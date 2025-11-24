@@ -1,7 +1,7 @@
 import streamlit as st
 import ezdxf
 from ezdxf import units
-from io import BytesIO
+from io import StringIO
 
 # Configurazione della pagina
 st.set_page_config(page_title="DXF Utility Tool", layout="centered")
@@ -33,16 +33,20 @@ with tab1:
             msp.add_circle((0, 0), radius=r_int, dxfattribs={'layer': 'CERCHI'})
             msp.add_circle((0, 0), radius=r_ext, dxfattribs={'layer': 'CERCHI'})
 
-            # Salvataggio in buffer di memoria (non su disco fisico)
-            buffer = BytesIO()
-            doc.write(buffer)
+            # CORREZIONE: Usiamo StringIO perché DXF è testo
+            output_stream = StringIO()
+            doc.write(output_stream)
+            
+            # Convertiamo la stringa in bytes per il download (UTF-8 è standard sicuro)
+            dxf_string = output_stream.getvalue()
+            dxf_bytes = dxf_string.encode('utf-8')
             
             st.success("File generato con successo!")
             
             # Bottone di download
             st.download_button(
                 label="📥 Scarica Cerchi.dxf",
-                data=buffer.getvalue(),
+                data=dxf_bytes,
                 file_name="cerchi_concentrici.dxf",
                 mime="application/dxf"
             )
@@ -56,44 +60,42 @@ with tab2:
 
     uploaded_file = st.file_uploader("Carica il tuo file DXF", type=["dxf"])
     
-    # Parametro spaziatura (richiesta utente: default 0.2mm)
-    spacing = st.number_input("Distanza righe (mm)", min_value=0.05, value=0.2, step=0.05, format="%.2f")
+    # Parametro spaziatura
+    spacing = st.number_input("Distanza righe (mm) - (Scala Hatch)", min_value=0.05, value=0.2, step=0.05, format="%.2f")
 
     if uploaded_file is not None:
         if st.button("Applica Campitura"):
             try:
-                # Lettura del file caricato (Streamlit gestisce i file come bytes)
-                # Dobbiamo leggere lo stream come testo per ezdxf
-                file_bytes = uploaded_file.getvalue()
-                # ezdxf richiede una stringa o un file system, usiamo un buffer testo
-                try:
-                    doc = ezdxf.read(BytesIO(file_bytes))
-                except Exception as e:
-                    st.error(f"Impossibile leggere il DXF. Assicurati che sia valido. Err: {e}")
-                    st.stop()
-
+                # 1. Leggiamo il file caricato (Streamlit dà bytes)
+                bytes_data = uploaded_file.getvalue()
+                
+                # 2. Decodifichiamo i bytes in stringa per ezdxf
+                # Usiamo 'ignore' per saltare eventuali caratteri corrotti, ma utf-8 è standard
+                string_data = bytes_data.decode('utf-8', errors='ignore')
+                
+                # 3. Leggiamo il DXF dalla stringa usando StringIO
+                doc = ezdxf.read(StringIO(string_data))
                 msp = doc.modelspace()
                 
-                # Definizione del pattern
-                # ANSI31 è lo standard per le linee a 45 gradi
-                # La scala deve essere calcolata. In ANSI31 standard, scale=1 significa circa 3mm di spaziatura.
-                # Questa è una approssimazione: Scale = SpaziaturaDesiderata / SpaziaturaBase
-                # Per precisione millimetrica, ezdxf ha strumenti più complessi, ma usiamo la scala visuale qui.
-                hatch_scale = spacing  # In DXF metrico puro, spesso scala 1 = 1 unità. 
-                                       # Nota: L'hatching DXF è complesso, dipende dalle unità del file origine.
+                # Definizione della scala (approssimazione per pattern ANSI31)
+                hatch_scale = spacing 
                 
                 count = 0
                 
-                # Cerchiamo entità chiuse da campire (Cerchi e Polilinee Chiuse)
+                # Cerchiamo entità chiuse da campire
                 for entity in msp:
                     if entity.dxftype() == 'CIRCLE':
+                        # Creiamo l'hatch
                         hatch = msp.add_hatch(color=1) # Colore 1 = Rosso
+                        
+                        # Aggiungiamo il contorno (boundary) basato sul cerchio esistente
                         hatch.paths.add_edge_path().add_arc(
                             center=entity.dxf.center,
                             radius=entity.dxf.radius,
                             start_angle=0,
                             end_angle=360
                         )
+                        # Impostiamo il pattern ANSI31 (linee a 45 gradi)
                         hatch.set_pattern_fill('ANSI31', scale=hatch_scale)
                         count += 1
                         
@@ -107,18 +109,22 @@ with tab2:
                 if count > 0:
                     st.success(f"Campitura applicata a {count} elementi!")
                     
-                    # Preparazione download
-                    out_buffer = BytesIO()
-                    doc.write(out_buffer)
+                    # 4. Salviamo il risultato in memoria usando StringIO
+                    output_stream = StringIO()
+                    doc.write(output_stream)
+                    
+                    # 5. Codifichiamo in bytes per il download
+                    dxf_out_string = output_stream.getvalue()
+                    dxf_out_bytes = dxf_out_string.encode('utf-8')
                     
                     st.download_button(
                         label="📥 Scarica DXF Modificato",
-                        data=out_buffer.getvalue(),
+                        data=dxf_out_bytes,
                         file_name=f"hatch_{uploaded_file.name}",
                         mime="application/dxf"
                     )
                 else:
-                    st.warning("Nessuna forma chiusa (Cerchi o Polilinee chiuse) trovata nel ModelSpace da campire.")
+                    st.warning("Nessuna forma chiusa (Cerchi o Polilinee chiuse) trovata da campire.")
                     
             except Exception as e:
-                st.error(f"Si è verificato un errore durante l'elaborazione: {e}")
+                st.error(f"Si è verificato un errore durante l'elaborazione del file: {e}")
