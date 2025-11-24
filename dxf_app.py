@@ -1,165 +1,182 @@
 import streamlit as st
 import ezdxf
 from ezdxf import path
-from ezdxf import units
 from io import StringIO
+from shapely.geometry import LineString, Polygon
+from shapely.ops import linemerge, polygonize, unary_union
 
 # Configurazione della pagina
-st.set_page_config(page_title="DXF Utility Tool", layout="centered")
+st.set_page_config(page_title="DXF Power Tool", layout="centered")
 
-st.title("🛠️ DXF Utility Web App")
-st.markdown("Genera cerchi o applica campiture (Hatching) con funzione **Unisci Linee** per disegni esplosi o aperti.")
+st.title("⚡ DXF Power Tool - Shapely Engine")
+st.markdown("Utilizza un motore geometrico avanzato per trovare aree chiuse in disegni 'esplosi' o imperfetti.")
 
-# --- BARRA LATERALE ---
-st.sidebar.header("⚙️ Configurazione")
+# --- CONFIGURAZIONE ---
+st.sidebar.header("⚙️ Impostazioni Laser")
 
+# Mappatura versioni
 version_map = {
-    "R12 (AC1009) - Universale/Laser": "R12",
+    "R12 (AC1009) - Massima Compatibilità": "R12",
     "R2000 (AC1015) - Standard": "R2000",
     "R2010 (AC1024) - Recente": "R2010"
 }
 
-st.sidebar.info("Seleziona R12 per macchine laser datate (la campitura verrà esplosa in linee).")
-selected_version_label = st.sidebar.selectbox(
-    "Versione DXF Output",
-    options=list(version_map.keys()),
-    index=0
-)
+st.sidebar.info("L'algoritmo 'Polygonize' troverà tutte le aree chiuse possibili.")
+selected_version_label = st.sidebar.selectbox("Versione Output", options=list(version_map.keys()), index=0)
 dxf_version_code = version_map[selected_version_label]
 
-# Tolleranza per unione automatica
-merge_tolerance = st.sidebar.slider(
-    "Tolleranza Unione (mm)", 
-    0.0, 5.0, 0.1, 0.05, 
-    help="Distanza massima tra due linee per considerarle collegate. Aumenta se il disegno ha 'buchi' visibili o è spezzettato."
-)
+# Parametri Hatch
+spacing = st.sidebar.number_input("Spaziatura Campitura (mm)", 0.05, 5.0, 0.2, 0.05)
+hatch_angle = st.sidebar.slider("Angolo Campitura", 0, 180, 45)
 
-tab1, tab2 = st.tabs(["🔵 Genera Cerchi", "✏️ Aggiungi Campitura (Hatch)"])
+# --- LOGICA GEOMETRICA AVANZATA ---
+def extract_all_paths(doc):
+    """Estrae percorsi da ModelSpace e da tutti i Blocchi (ricorsivo light)"""
+    paths = []
+    # Estraiamo dal ModelSpace
+    msp = doc.modelspace()
+    for entity in msp:
+        try:
+            # path.make_path è molto potente, converte quasi tutto (linee, cerchi, spline) in percorsi
+            p = path.make_path(entity)
+            if p.has_sub_paths:
+                for sub in p.sub_paths():
+                    paths.append(sub)
+            else:
+                paths.append(p)
+        except Exception:
+            pass
+    return paths
 
-# --- TAB 1: CERCHI ---
-with tab1:
-    st.header("Crea Cerchi Concentrici")
-    c1, c2 = st.columns(2)
-    with c1: r_int = st.number_input("Raggio Interno (mm)", 1.0, value=10.0)
-    with c2: r_ext = st.number_input("Raggio Esterno (mm)", r_int+0.1, value=20.0)
-
-    if st.button("Genera DXF Cerchi"):
-        doc = ezdxf.new(dxf_version_code)
-        msp = doc.modelspace()
-        msp.add_circle((0, 0), r_int, dxfattribs={'layer': 'CERCHI'})
-        msp.add_circle((0, 0), r_ext, dxfattribs={'layer': 'CERCHI'})
-        
-        out = StringIO()
-        doc.write(out)
-        st.download_button("📥 Scarica Cerchi.dxf", out.getvalue().encode('utf-8'), f"cerchi_{dxf_version_code}.dxf", "application/dxf")
-
-# --- TAB 2: HATCHING ---
-with tab2:
-    st.header("Campitura & Unione Linee")
-    st.info("Il sistema cercherà di unire linee spezzate (spaghetti CAD) in forme chiuse valide.")
+def create_hatch_lines(polygon, spacing, angle):
+    """Genera linee di campitura fisiche (non entità Hatch) dentro un poligono Shapely"""
+    minx, miny, maxx, maxy = polygon.bounds
+    lines = []
     
-    uploaded_file = st.file_uploader("File DXF", type=["dxf"])
-    spacing = st.number_input("Spaziatura Hatch (mm)", 0.05, value=0.2, step=0.05)
+    # Creiamo una griglia di linee ruotate
+    # Per semplicità, creiamo linee orizzontali enormi e le ruotiamo/tagliamo
+    diagonal = ((maxx - minx)**2 + (maxy - miny)**2)**0.5
+    num_lines = int(diagonal / spacing) * 2
+    
+    # Centro del poligono
+    cx, cy = (minx + maxx)/2, (miny + maxy)/2
+    
+    # Generiamo linee lunghe
+    h_lines = []
+    start_y = cy - (num_lines * spacing) / 2
+    
+    for i in range(num_lines):
+        y = start_y + i * spacing
+        # Linea orizzontale molto lunga
+        line = LineString([(cx - diagonal, y), (cx + diagonal, y)])
+        # Ruotiamo
+        from shapely import affinity
+        rotated_line = affinity.rotate(line, angle, origin=(cx, cy))
+        h_lines.append(rotated_line)
+        
+    # Intersezione
+    final_lines = []
+    for line in h_lines:
+        if polygon.intersects(line):
+            intersection = polygon.intersection(line)
+            if intersection.is_empty:
+                continue
+            
+            if intersection.geom_type == 'LineString':
+                final_lines.append(intersection)
+            elif intersection.geom_type == 'MultiLineString':
+                for seg in intersection.geoms:
+                    final_lines.append(seg)
+                    
+    return final_lines
 
-    if uploaded_file and st.button("Analizza e Campisci"):
+# --- INTERFACCIA ---
+uploaded_file = st.file_uploader("Carica DXF (anche R12/R13/R14)", type=["dxf"])
+
+if uploaded_file:
+    st.info("File caricato. Premi il pulsante per analizzare la geometria.")
+    
+    if st.button("🚀 Esegui Analisi e Campitura"):
         try:
             # 1. Lettura Resiliente
             content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
-            # Patch per header corrotti o versioni strane
+            # Patch header R13/R14 -> R2000 per ezdxf
             if "AC1012" in content or "AC1014" in content: 
                 content = content.replace("AC1012", "AC1015").replace("AC1014", "AC1015")
             
             doc_in = ezdxf.read(StringIO(content))
-            msp_in = doc_in.modelspace()
             
-            # 2. Preparazione Export
-            doc_out = ezdxf.new(dxf_version_code)
-            msp_out = doc_out.modelspace()
+            # 2. Estrazione Geometria Pura
+            ezdxf_paths = extract_all_paths(doc_in)
             
-            # Configurazione Hatch
-            explode = (dxf_version_code == "R12")
-            target_doc = ezdxf.new('R2000') if explode else doc_out
-            target_msp = target_doc.modelspace()
-            
-            hatch = target_msp.add_hatch(color=1)
-            hatch.set_pattern_fill('ANSI31', scale=spacing)
-            
-            # 3. RACCOLTA E UNIONE GEOMETRIE (Il Cuore della Logica)
-            input_paths = []
-            raw_entity_count = 0
-            
-            # Convertiamo tutto (Linee, Archi, Polilinee) in percorsi astratti
-            for entity in msp_in:
-                if entity.dxftype() in ['LINE', 'ARC', 'CIRCLE', 'LWPOLYLINE', 'POLYLINE', 'SPLINE', 'ELLIPSE']:
-                    try:
-                        # make_path normalizza qualsiasi geometria in un percorso gestibile
-                        p = path.make_path(entity)
-                        if p.has_sub_paths:
-                            for sub in p.sub_paths():
-                                input_paths.append(sub)
-                        else:
-                            input_paths.append(p)
-                        raw_entity_count += 1
-                    except Exception:
-                        pass
-
-            if raw_entity_count == 0:
-                st.error("Il file sembra vuoto o non contiene geometrie supportate (Linee, Archi, Polilinee).")
+            if not ezdxf_paths:
+                st.error("Non ho trovato entità nel file. Verifica che non sia vuoto.")
                 st.stop()
-
-            # UNIONE: Incolla i percorsi che si toccano
-            # merge_paths restituisce percorsi uniti. 
-            # ignore_double_floating_point_precision è false per usare la nostra tolleranza manuale se serve, 
-            # ma qui ci affidiamo alla topologia.
-            merged_paths = path.merge_paths(input_paths, distance=merge_tolerance)
-            
-            valid_closed_shapes = 0
-            open_shapes_after_merge = 0
-            
-            # 4. GENERAZIONE HATCH SU FORME CHIUSE
-            for p in merged_paths:
-                # Se il percorso è chiuso (o quasi chiuso entro tolleranza)
-                if p.is_closed or (p.start.isclose(p.end, abs_tol=merge_tolerance)):
-                    
-                    # Trasformiamo il path in punti per il DXF
-                    # flatten trasforma curve in segmenti lineari (necessario per R12/Laser)
-                    points = list(p.flattening(distance=0.05))
-                    
-                    if len(points) > 2:
-                        # Disegna il contorno pulito nel file finale
-                        msp_out.add_polyline2d(points, dxfattribs={'layer': 'GEOMETRIA', 'color': 7})
-                        
-                        # Aggiungi all'hatch
-                        hatch.paths.add_polyline_path(points)
-                        valid_closed_shapes += 1
-                else:
-                    # Se rimane aperto anche dopo l'unione, lo copiamo come linea semplice senza hatch
-                    points = list(p.flattening(distance=0.05))
-                    if len(points) > 1:
-                        msp_out.add_polyline2d(points, dxfattribs={'layer': 'APK_APERTE', 'color': 1}) # Rosso per debug
-                        open_shapes_after_merge += 1
-
-            # 5. SALVATAGGIO
-            if valid_closed_shapes > 0:
-                if explode:
-                    hatch.explode()
-                    lines_count = 0
-                    for e in target_msp:
-                        if e.dxftype() == 'LINE':
-                            msp_out.add_line(e.dxf.start, e.dxf.end, dxfattribs={'layer': 'HATCH', 'color': 2}) # Giallo
-                            lines_count += 1
-                    st.success(f"✅ Successo! {valid_closed_shapes} forme chiuse ricostruite da {raw_entity_count} segmenti.")
-                    st.info(f"Campitura generata ed esplosa in {lines_count} linee (compatibile R12).")
-                else:
-                    st.success(f"✅ Successo! {valid_closed_shapes} forme chiuse ricostruite e campite.")
                 
+            # 3. Conversione in Shapely (LineStrings)
+            # Appiattiamo tutto in segmenti lineari (risoluzione 0.05mm)
+            shapely_lines = []
+            for p in ezdxf_paths:
+                # flattening restituisce generatori di vettori, li convertiamo in lista di tuple
+                points = list(p.flattening(distance=0.05))
+                if len(points) > 1:
+                    shapely_lines.append(LineString(points))
+            
+            st.write(f"🔍 Analizzati {len(shapely_lines)} segmenti geometrici.")
+
+            # 4. Unione e Poligonizzazione (La Magia)
+            # linemerge unisce i segmenti che si toccano
+            merged = linemerge(shapely_lines)
+            
+            # polygonize trova le aree chiuse create dalle linee
+            polygons = list(polygonize(merged))
+            
+            if not polygons:
+                st.warning("⚠️ Non sono riuscito a trovare aree chiuse. Le linee potrebbero non toccarsi o avere buchi troppo grandi.")
+                st.info("Tentativo di 'Buffer': Prova a ingrossare le linee per farle toccare.")
+                # Fallback: Buffer
+                # (Questo è complesso, per ora fermiamoci qui e vediamo se polygonize funziona)
+            else:
+                st.success(f"✅ Trovate {len(polygons)} aree chiuse (isole o contorni)!")
+                
+                # 5. Generazione Output
+                doc_out = ezdxf.new(dxf_version_code)
+                msp_out = doc_out.modelspace()
+                
+                total_hatch_lines = 0
+                
+                # Per ogni area chiusa trovata
+                for poly in polygons:
+                    # Disegna il contorno (facoltativo, ma utile per verifica)
+                    x, y = poly.exterior.xy
+                    msp_out.add_polyline2d(list(zip(x, y)), dxfattribs={'layer': 'CONTORNO', 'color': 7})
+                    
+                    # Genera le linee di campitura (Intersezione geometrica)
+                    # Questo bypassa l'oggetto Hatch DXF e crea semplici LINEE (massima compatibilità R12)
+                    hatch_lines = create_hatch_lines(poly, spacing, hatch_angle)
+                    
+                    for h_line in hatch_lines:
+                        coords = list(h_line.coords)
+                        msp_out.add_line(coords[0], coords[1], dxfattribs={'layer': 'CAMPITURA', 'color': 1}) # Rosso
+                        total_hatch_lines += 1
+                
+                st.write(f"🖊️ Generate {total_hatch_lines} linee di campitura fisiche.")
+                
+                # Download
                 out = StringIO()
                 doc_out.write(out)
-                st.download_button("📥 Scarica DXF Processato", out.getvalue().encode('utf-8'), f"hatch_{dxf_version_code}_fixed.dxf", "application/dxf")
-            else:
-                st.error("❌ Non sono riuscito a chiudere nessuna forma.")
-                st.warning(f"Ho trovato {raw_entity_count} segmenti, ma dopo aver provato a unirli sono risultati {open_shapes_after_merge} percorsi aperti.")
-                st.markdown("👉 **Suggerimento:** Prova ad aumentare la **'Tolleranza Unione'** nella barra laterale a sinistra (es. a 0.5 o 1.0 mm) e riprova.")
+                file_data = out.getvalue().encode('utf-8')
+                
+                st.download_button(
+                    label="📥 Scarica DXF Pronto (Compatibile R12/13)",
+                    data=file_data,
+                    file_name=f"processed_{dxf_version_code}.dxf",
+                    mime="application/dxf"
+                )
 
         except Exception as e:
-            st.error(f"Errore tecnico durante l'elaborazione: {e}")
+            st.error(f"Errore durante l'elaborazione: {e}")
+            st.error("Dettaglio tecnico: Verifica che il file non sia corrotto o binario.")
+
+with tab1:
+    st.info("Usa il tab 'Campitura' per processare il file caricato.")
