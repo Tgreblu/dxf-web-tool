@@ -1,7 +1,7 @@
 import streamlit as st
 import ezdxf
 from ezdxf import units
-from io import BytesIO
+from io import BytesIO, StringIO
 import math
 
 # Configurazione della pagina Streamlit
@@ -14,12 +14,14 @@ Questa app ti permette di:
 2. Applicare una campitura (Hatch) a file esistenti.
 """)
 
-# Funzione per convertire il DXF in bytes per il download
+# Funzione CORRETTA per convertire il DXF in bytes per il download
+# ezdxf scrive testo, quindi usiamo StringIO poi convertiamo in bytes
 def get_dxf_bytes(doc):
-    buffer = BytesIO()
-    doc.write(buffer)
-    buffer.seek(0)
-    return buffer
+    text_buffer = StringIO()
+    doc.write(text_buffer)
+    # Convertiamo la stringa DXF in bytes (utf-8 è sicuro per il web, cp1252 per compatibilità vecchia)
+    # Usiamo cp1252 per massima compatibilità con macchine laser/CNC
+    return text_buffer.getvalue().encode('cp1252', errors='ignore')
 
 # --- TAB 1: CREATORE DI CERCHI ---
 tab1, tab2 = st.tabs(["🔵 Crea Cerchi", "📐 Applica Campitura"])
@@ -66,69 +68,56 @@ with tab2:
     
     # Parametri campitura
     hatch_dist = st.slider("Distanza Linee (mm)", 0.1, 5.0, 0.2, step=0.1)
-    
-    # Nota tecnica: L'algoritmo usa pattern ANSI31 (linee a 45 gradi).
-    # La scala del pattern in ezdxf non è 1:1 con i mm, ma dipende dal pattern definition.
-    # Per ANSI31, lo spacing base è circa 0.125 pollici o una unità arbitraria.
-    # Faremo una stima della scala.
-    hatch_scale = hatch_dist  # Semplificazione, modificabile se necessario
+    hatch_scale = hatch_dist 
     
     if uploaded_file is not None:
         try:
-            # Leggiamo il file caricato. Usiamo un buffer bytesIO
-            # Nota: ezdxf.read() si aspetta un file su disco o uno stream testo, 
-            # streamlitte passa bytes, quindi dobbiamo decodificare.
+            # CORREZIONE LETTURA:
+            # 1. Otteniamo i bytes dal file caricato
             bytes_content = uploaded_file.getvalue()
-            # Carichiamo il documento dalla memoria
+            
+            # 2. Decodifichiamo i bytes in stringa (DXF è un formato testo)
+            # Proviamo prima cp1252 (standard Windows/CNC), poi utf-8 come fallback
             try:
-                doc = ezdxf.read(BytesIO(bytes_content))
-            except Exception as e:
-                st.error(f"Errore nella lettura del DXF: {e}")
-                st.stop()
+                str_content = bytes_content.decode('cp1252')
+            except UnicodeDecodeError:
+                str_content = bytes_content.decode('utf-8', errors='ignore')
+            
+            # 3. Passiamo lo stream di TESTO a ezdxf
+            doc = ezdxf.read(StringIO(str_content))
             
             msp = doc.modelspace()
             
-            # Creiamo un nuovo documento per l'output per pulizia (versione R2000 necessaria per HATCH)
+            # Creiamo un nuovo documento per l'output (R2000 necessario per HATCH)
             new_doc = ezdxf.new('R2000') 
             new_msp = new_doc.modelspace()
             
             # --- LOGICA DI CAMPITURA ---
-            # Per creare una campitura corretta che rispetta le "isole" (loop nest),
-            # dobbiamo aggiungere tutti i confini a UN UNICO oggetto Hatch.
-            
-            hatch = new_msp.add_hatch(color=1) # Colore 1 = Rosso (spesso usato per incisione)
-            
-            # Impostiamo il pattern: ANSI31 sono linee diagonali a 45 gradi
+            hatch = new_msp.add_hatch(color=1) 
             hatch.set_pattern_fill('ANSI31', scale=hatch_scale)
             
             found_entities = 0
             
-            # Iteriamo sulle entità del file originale
-            # Nota: Questo script supporta Cerchi e LWPolylines (le più comuni per il taglio laser)
             for entity in msp:
                 if entity.dxftype() == 'CIRCLE':
-                    # Aggiungiamo il cerchio come percorso del confine
-                    # ezdxf gestisce automaticamente la conversione
                     hatch.paths.add_polyline_path(
                         ezdxf.path.make_path(entity).flattening(distance=0.01)
                     )
-                    # Copiamo anche la geometria originale nel nuovo file (per il taglio)
+                    # Copia geometria originale
                     new_msp.add_circle(entity.dxf.center, entity.dxf.radius)
                     found_entities += 1
                     
                 elif entity.dxftype() == 'LWPOLYLINE':
-                    # Otteniamo i punti della polilinea
                     path = ezdxf.path.make_path(entity)
                     hatch.paths.add_polyline_path(path.flattening(distance=0.01))
-                    
-                    # Copiamo la polilinea originale
+                    # Copia polilinea originale
                     new_msp.add_lwpolyline(entity.get_points(), close=entity.closed)
                     found_entities += 1
 
             if found_entities > 0:
                 st.write(f"Trovate {found_entities} geometrie. Generazione campitura...")
                 
-                # Eseguiamo il download
+                # Usiamo la funzione corretta get_dxf_bytes
                 out_hatch_buffer = get_dxf_bytes(new_doc)
                 
                 st.success("Campitura applicata! Scarica il file qui sotto.")
@@ -145,4 +134,4 @@ with tab2:
             st.error(f"Si è verificato un errore durante l'elaborazione: {e}")
 
 st.markdown("---")
-st.caption("Creato per te - Compatibile R2000 (standard per laser moderni)")
+st.caption("Creato per te - Compatibile R2000")
