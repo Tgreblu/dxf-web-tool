@@ -7,7 +7,7 @@ from io import StringIO
 st.set_page_config(page_title="DXF Utility Tool", layout="centered")
 
 st.title("🛠️ DXF Utility Web App")
-st.markdown("Genera cerchi concentrici o aggiungi hatching con rilevamento isole.")
+st.markdown("Genera cerchi concentrici o aggiungi hatching con rilevamento isole (Supporto Spline).")
 
 # --- BARRA LATERALE PER IMPOSTAZIONI ---
 st.sidebar.header("⚙️ Impostazioni Macchina")
@@ -71,7 +71,7 @@ with tab1:
 # --- FUNZIONE 2: HATCHING (CAMPITURA INTELLIGENTE) ---
 with tab2:
     st.header("Aggiungi Campitura a 45°")
-    st.info("Carica un file DXF. Le forme concentriche verranno campite come 'isole'.")
+    st.info("Carica un file DXF. Supporta Cerchi, Polilinee e Spline chiuse.")
 
     uploaded_file = st.file_uploader("Carica il tuo file DXF", type=["dxf"])
     spacing = st.number_input("Distanza righe (mm)", min_value=0.05, value=0.2, step=0.05, format="%.2f")
@@ -91,37 +91,30 @@ with tab2:
                 doc_original = ezdxf.read(StringIO(string_data))
                 msp_original = doc_original.modelspace()
                 
-                # 2. Preparazione Documento Finale (es. R12)
+                # 2. Preparazione Documento Finale
                 doc_export = ezdxf.new(dxf_version_code)
                 doc_export.units = units.MM
                 msp_export = doc_export.modelspace()
 
                 # 3. Gestione Hatch per R12 (Esplosione)
-                # Se l'output è R12, non possiamo usare l'entità Hatch.
-                # Dobbiamo calcolarla in un documento temporaneo moderno (R2000), esploderla in linee,
-                # e copiare le linee nel documento R12.
                 explode_hatch = (dxf_version_code == "R12")
                 
                 if explode_hatch:
-                    doc_temp = ezdxf.new('R2000') # Serve solo per calcolare la geometria
+                    doc_temp = ezdxf.new('R2000')
                     msp_hatch_target = doc_temp.modelspace()
                 else:
-                    msp_hatch_target = msp_export # Scriviamo direttamente nel file finale
+                    msp_hatch_target = msp_export
 
-                # Creazione Hatch nel target appropriato
                 hatch = msp_hatch_target.add_hatch(color=1)
                 hatch.set_pattern_fill('ANSI31', scale=spacing)
-                hatch.dxf.hatch_style = 0 # Normal (Islands detection)
+                hatch.dxf.hatch_style = 0 
                 
                 count = 0
                 
                 # 4. Ricostruzione Geometrie e Contorni Hatch
                 for entity in msp_original:
                     if entity.dxftype() == 'CIRCLE':
-                        # Disegna geometria nel file finale
                         msp_export.add_circle(entity.dxf.center, entity.dxf.radius, dxfattribs={'layer': 'GEOMETRIA'})
-                        
-                        # Aggiungi contorno all'hatch (per il calcolo)
                         hatch.paths.add_edge_path().add_arc(
                             center=entity.dxf.center,
                             radius=entity.dxf.radius,
@@ -144,14 +137,28 @@ with tab2:
                                 msp_export.add_polyline2d(points, close=True, dxfattribs={'layer': 'GEOMETRIA'})
                                 hatch.paths.add_polyline_path(points)
                                 count += 1
+                    
+                    # NUOVO SUPPORTO SPLINE
+                    elif entity.dxftype() == 'SPLINE':
+                        # Le spline sono complesse per il laser. Le convertiamo in polilinee dense.
+                        # La proprietà closed delle spline può essere tricky, verifichiamo flag o geometria
+                        try:
+                            if entity.closed: # Verifica se la spline è dichiarata chiusa
+                                # flattening trasforma la curva in tanti segmenti (approssimazione 0.05mm)
+                                points = list(entity.flattening(distance=0.05))
+                                if len(points) > 2:
+                                    # Aggiungiamo come polilinea nel file finale (più sicuro per il laser)
+                                    msp_export.add_lwpolyline(points, close=True, dxfattribs={'layer': 'GEOMETRIA'})
+                                    # Usiamo gli stessi punti per l'hatch
+                                    hatch.paths.add_polyline_path(points)
+                                    count += 1
+                        except Exception:
+                            pass # Ignora spline malformate
 
                 if count > 0:
                     # 5. Fase Finale: Esplosione (Se R12)
                     if explode_hatch:
-                        # Trasforma il blocco Hatch in tante linee semplici
                         hatch.explode()
-                        
-                        # Copia le linee risultanti nel file finale R12
                         lines_count = 0
                         for entity in msp_hatch_target:
                             if entity.dxftype() == 'LINE':
@@ -161,11 +168,10 @@ with tab2:
                                     dxfattribs={'layer': 'CAMPITURA'}
                                 )
                                 lines_count += 1
-                        st.success(f"Campitura generata ed esplosa in {lines_count} linee per compatibilità R12!")
+                        st.success(f"Campitura applicata a {count} forme (incluse Spline) ed esplosa in {lines_count} linee per R12!")
                     else:
-                        st.success(f"Campitura generata come entità HATCH (R2000+).")
+                        st.success(f"Campitura applicata a {count} forme.")
 
-                    # Salvataggio
                     output_stream = StringIO()
                     doc_export.write(output_stream)
                     dxf_out_bytes = output_stream.getvalue().encode('utf-8')
@@ -177,7 +183,8 @@ with tab2:
                         mime="application/dxf"
                     )
                 else:
-                    st.warning("Nessuna forma chiusa valida trovata.")
+                    st.warning("Nessuna forma chiusa valida trovata (Cerchi, Polilinee o Spline chiuse).")
+                    st.info("Suggerimento: Verifica che il disegno sia composto da linee chiuse o curve unite, non linee spezzate separate.")
                     
             except Exception as e:
                 st.error(f"Errore: {e}")
