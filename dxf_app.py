@@ -1,43 +1,41 @@
 import streamlit as st
 import ezdxf
-from ezdxf import path
+from ezdxf import path, units
 from io import StringIO
 from shapely.geometry import LineString, Polygon
-from shapely.ops import linemerge, polygonize, unary_union
+from shapely.ops import linemerge, polygonize
+from shapely import affinity
 
 # Configurazione della pagina
 st.set_page_config(page_title="DXF Power Tool", layout="centered")
 
 st.title("⚡ DXF Power Tool - Shapely Engine")
-st.markdown("Utilizza un motore geometrico avanzato per trovare aree chiuse in disegni 'esplosi' o imperfetti.")
+st.markdown("Generatore di Cerchi e sistema avanzato di Campitura per disegni CAD.")
 
-# --- CONFIGURAZIONE ---
+# --- CONFIGURAZIONE LATERALE ---
 st.sidebar.header("⚙️ Impostazioni Laser")
 
-# Mappatura versioni
 version_map = {
     "R12 (AC1009) - Massima Compatibilità": "R12",
     "R2000 (AC1015) - Standard": "R2000",
     "R2010 (AC1024) - Recente": "R2010"
 }
 
-st.sidebar.info("L'algoritmo 'Polygonize' troverà tutte le aree chiuse possibili.")
+st.sidebar.info("Seleziona R12 per macchine laser datate. La campitura sarà esplosa in linee singole.")
 selected_version_label = st.sidebar.selectbox("Versione Output", options=list(version_map.keys()), index=0)
 dxf_version_code = version_map[selected_version_label]
 
-# Parametri Hatch
-spacing = st.sidebar.number_input("Spaziatura Campitura (mm)", 0.05, 5.0, 0.2, 0.05)
-hatch_angle = st.sidebar.slider("Angolo Campitura", 0, 180, 45)
+# Creazione Tab (Questa riga mancava prima!)
+tab1, tab2 = st.tabs(["🔵 Genera Cerchi", "✏️ Campitura Avanzata (Shapely)"])
 
-# --- LOGICA GEOMETRICA AVANZATA ---
+# --- FUNZIONI DI SUPPORTO (MOTORE GEOMETRICO) ---
 def extract_all_paths(doc):
-    """Estrae percorsi da ModelSpace e da tutti i Blocchi (ricorsivo light)"""
+    """Estrae percorsi da ModelSpace e da tutti i Blocchi in modo sicuro."""
     paths = []
-    # Estraiamo dal ModelSpace
     msp = doc.modelspace()
     for entity in msp:
         try:
-            # path.make_path è molto potente, converte quasi tutto (linee, cerchi, spline) in percorsi
+            # Converte qualsiasi entità (Linee, Archi, Spline, Cerchi) in percorsi
             p = path.make_path(entity)
             if p.has_sub_paths:
                 for sub in p.sub_paths():
@@ -45,38 +43,37 @@ def extract_all_paths(doc):
             else:
                 paths.append(p)
         except Exception:
-            pass
+            pass # Ignora entità non geometriche (testi, quote)
     return paths
 
 def create_hatch_lines(polygon, spacing, angle):
-    """Genera linee di campitura fisiche (non entità Hatch) dentro un poligono Shapely"""
+    """Genera linee di campitura fisiche tagliando linee lunghe con il poligono."""
     minx, miny, maxx, maxy = polygon.bounds
-    lines = []
     
-    # Creiamo una griglia di linee ruotate
-    # Per semplicità, creiamo linee orizzontali enormi e le ruotiamo/tagliamo
+    # Calcolo diagonale per coprire l'intera area
     diagonal = ((maxx - minx)**2 + (maxy - miny)**2)**0.5
-    num_lines = int(diagonal / spacing) * 2
+    # Aumentiamo l'area di copertura per sicurezza
+    coverage = diagonal * 1.5
     
     # Centro del poligono
     cx, cy = (minx + maxx)/2, (miny + maxy)/2
     
-    # Generiamo linee lunghe
-    h_lines = []
+    # Numero linee stimate
+    num_lines = int(coverage / spacing)
     start_y = cy - (num_lines * spacing) / 2
     
+    # Generazione linee orizzontali lunghe
+    raw_lines = []
     for i in range(num_lines):
         y = start_y + i * spacing
-        # Linea orizzontale molto lunga
-        line = LineString([(cx - diagonal, y), (cx + diagonal, y)])
-        # Ruotiamo
-        from shapely import affinity
+        line = LineString([(cx - coverage, y), (cx + coverage, y)])
+        # Rotazione
         rotated_line = affinity.rotate(line, angle, origin=(cx, cy))
-        h_lines.append(rotated_line)
+        raw_lines.append(rotated_line)
         
-    # Intersezione
+    # Intersezione (Taglio)
     final_lines = []
-    for line in h_lines:
+    for line in raw_lines:
         if polygon.intersects(line):
             intersection = polygon.intersection(line)
             if intersection.is_empty:
@@ -90,93 +87,115 @@ def create_hatch_lines(polygon, spacing, angle):
                     
     return final_lines
 
-# --- INTERFACCIA ---
-uploaded_file = st.file_uploader("Carica DXF (anche R12/R13/R14)", type=["dxf"])
+# --- TAB 1: CERCHI CONCENTRICI ---
+with tab1:
+    st.header("Crea Cerchi Concentrici")
+    c1, c2 = st.columns(2)
+    with c1: 
+        r_int = st.number_input("Raggio Interno (mm)", 1.0, value=10.0, step=0.5)
+    with c2: 
+        r_ext = st.number_input("Raggio Esterno (mm)", r_int+0.1, value=20.0, step=0.5)
 
-if uploaded_file:
-    st.info("File caricato. Premi il pulsante per analizzare la geometria.")
+    if st.button("Genera DXF Cerchi"):
+        doc = ezdxf.new(dxf_version_code)
+        doc.units = units.MM
+        msp = doc.modelspace()
+        
+        msp.add_circle((0, 0), radius=r_int, dxfattribs={'layer': 'CERCHI'})
+        msp.add_circle((0, 0), radius=r_ext, dxfattribs={'layer': 'CERCHI'})
+        
+        out = StringIO()
+        doc.write(out)
+        st.success(f"File generato (Versione {dxf_version_code})")
+        st.download_button(
+            label="📥 Scarica Cerchi.dxf",
+            data=out.getvalue().encode('utf-8'),
+            file_name=f"cerchi_{dxf_version_code}.dxf",
+            mime="application/dxf"
+        )
+
+# --- TAB 2: CAMPITURA AVANZATA (SHAPELY) ---
+with tab2:
+    st.header("Campitura 'Ricostruttiva'")
+    st.info("Questo strumento ricostruisce le forme da linee esplose e applica la campitura.")
     
-    if st.button("🚀 Esegui Analisi e Campitura"):
+    col_opt1, col_opt2 = st.columns(2)
+    with col_opt1:
+        spacing = st.number_input("Spaziatura (mm)", 0.05, 10.0, 0.2, 0.05)
+    with col_opt2:
+        hatch_angle = st.slider("Angolo (°)", 0, 180, 45)
+
+    uploaded_file = st.file_uploader("Carica il tuo file DXF", type=["dxf"])
+
+    if uploaded_file and st.button("🚀 Analizza e Campisci"):
         try:
-            # 1. Lettura Resiliente
+            # 1. Lettura del file
             content = uploaded_file.getvalue().decode('utf-8', errors='ignore')
-            # Patch header R13/R14 -> R2000 per ezdxf
             if "AC1012" in content or "AC1014" in content: 
                 content = content.replace("AC1012", "AC1015").replace("AC1014", "AC1015")
             
             doc_in = ezdxf.read(StringIO(content))
             
-            # 2. Estrazione Geometria Pura
+            # 2. Estrazione Percorsi
             ezdxf_paths = extract_all_paths(doc_in)
             
             if not ezdxf_paths:
-                st.error("Non ho trovato entità nel file. Verifica che non sia vuoto.")
+                st.error("Il file sembra vuoto o non contiene linee valide.")
                 st.stop()
-                
-            # 3. Conversione in Shapely (LineStrings)
-            # Appiattiamo tutto in segmenti lineari (risoluzione 0.05mm)
+            
+            # 3. Conversione in Geometria Shapely
             shapely_lines = []
             for p in ezdxf_paths:
-                # flattening restituisce generatori di vettori, li convertiamo in lista di tuple
-                points = list(p.flattening(distance=0.05))
+                # Appiattimento curve in segmenti lineari (risoluzione alta 0.01mm)
+                points = list(p.flattening(distance=0.01))
                 if len(points) > 1:
                     shapely_lines.append(LineString(points))
             
-            st.write(f"🔍 Analizzati {len(shapely_lines)} segmenti geometrici.")
-
-            # 4. Unione e Poligonizzazione (La Magia)
-            # linemerge unisce i segmenti che si toccano
+            # 4. Unione Linee (Merge) e Poligonizzazione
+            # Unisce segmenti che si toccano
             merged = linemerge(shapely_lines)
             
-            # polygonize trova le aree chiuse create dalle linee
+            # Trova aree chiuse
             polygons = list(polygonize(merged))
             
             if not polygons:
-                st.warning("⚠️ Non sono riuscito a trovare aree chiuse. Le linee potrebbero non toccarsi o avere buchi troppo grandi.")
-                st.info("Tentativo di 'Buffer': Prova a ingrossare le linee per farle toccare.")
-                # Fallback: Buffer
-                # (Questo è complesso, per ora fermiamoci qui e vediamo se polygonize funziona)
+                st.warning("⚠️ Non sono state trovate aree completamente chiuse.")
+                st.info("Suggerimento: Il disegno potrebbe avere micro-interruzioni. Prova a ripassare i contorni nel CAD originale.")
             else:
-                st.success(f"✅ Trovate {len(polygons)} aree chiuse (isole o contorni)!")
+                st.success(f"✅ Trovate {len(polygons)} aree chiuse!")
                 
                 # 5. Generazione Output
                 doc_out = ezdxf.new(dxf_version_code)
+                doc_out.units = units.MM
                 msp_out = doc_out.modelspace()
                 
                 total_hatch_lines = 0
                 
-                # Per ogni area chiusa trovata
                 for poly in polygons:
-                    # Disegna il contorno (facoltativo, ma utile per verifica)
-                    x, y = poly.exterior.xy
-                    msp_out.add_polyline2d(list(zip(x, y)), dxfattribs={'layer': 'CONTORNO', 'color': 7})
+                    # (Opzionale) Disegna il contorno ricostruito
+                    if poly.exterior:
+                        x, y = poly.exterior.xy
+                        msp_out.add_polyline2d(list(zip(x, y)), dxfattribs={'layer': 'CONTORNO_RICOSTRUITO', 'color': 7})
                     
-                    # Genera le linee di campitura (Intersezione geometrica)
-                    # Questo bypassa l'oggetto Hatch DXF e crea semplici LINEE (massima compatibilità R12)
-                    hatch_lines = create_hatch_lines(poly, spacing, hatch_angle)
-                    
-                    for h_line in hatch_lines:
-                        coords = list(h_line.coords)
-                        msp_out.add_line(coords[0], coords[1], dxfattribs={'layer': 'CAMPITURA', 'color': 1}) # Rosso
+                    # Calcola e disegna la campitura
+                    lines = create_hatch_lines(poly, spacing, hatch_angle)
+                    for l in lines:
+                        coords = list(l.coords)
+                        # Aggiungiamo LINEE SEMPLICI (compatibilità R12 100%)
+                        msp_out.add_line(coords[0], coords[1], dxfattribs={'layer': 'CAMPITURA', 'color': 1})
                         total_hatch_lines += 1
                 
-                st.write(f"🖊️ Generate {total_hatch_lines} linee di campitura fisiche.")
+                st.write(f"🖊️ Generate {total_hatch_lines} linee di campitura.")
                 
-                # Download
-                out = StringIO()
-                doc_out.write(out)
-                file_data = out.getvalue().encode('utf-8')
+                out_buffer = StringIO()
+                doc_out.write(out_buffer)
                 
                 st.download_button(
-                    label="📥 Scarica DXF Pronto (Compatibile R12/13)",
-                    data=file_data,
-                    file_name=f"processed_{dxf_version_code}.dxf",
+                    label="📥 Scarica DXF Processato",
+                    data=out_buffer.getvalue().encode('utf-8'),
+                    file_name=f"hatch_fixed_{dxf_version_code}.dxf",
                     mime="application/dxf"
                 )
 
         except Exception as e:
-            st.error(f"Errore durante l'elaborazione: {e}")
-            st.error("Dettaglio tecnico: Verifica che il file non sia corrotto o binario.")
-
-with tab1:
-    st.info("Usa il tab 'Campitura' per processare il file caricato.")
+            st.error(f"Si è verificato un errore: {e}")
