@@ -27,7 +27,7 @@
         </div>
 
         <p class="text-gray-600 mb-6 text-sm">
-            Inserisci il testo, imposta i parametri e genera un file DXF con linee fisiche (Loop Nesting automatico).
+            Inserisci il testo. Il sistema unirà automaticamente le geometrie sovrapposte (Boolean Union) per creare un outline pulito.
         </p>
 
         <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
@@ -56,7 +56,7 @@
                 
                 <div class="flex items-center space-x-2 mt-2">
                      <input type="checkbox" id="includeOutline" checked onchange="scheduleUpdate()" class="rounded text-blue-600 focus:ring-blue-500">
-                     <label for="includeOutline" class="text-sm text-gray-700">Includi Perimetro (Contorno)</label>
+                     <label for="includeOutline" class="text-sm text-gray-700">Includi Perimetro (Contorno Unito)</label>
                 </div>
 
                 <div class="pt-4">
@@ -70,7 +70,7 @@
 
             <!-- Preview -->
             <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Anteprima</label>
+                <label class="block text-sm font-medium text-gray-700 mb-1">Anteprima (Rosso=Hatch, Blu=Outline Unito)</label>
                 <!-- Canvas Paper.js -->
                 <canvas id="previewCanvas" resize></canvas>
             </div>
@@ -78,7 +78,7 @@
         
         <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mt-4">
             <p class="text-sm text-yellow-700">
-                <strong>Nota:</strong> Se non vedi l'anteprima dopo qualche secondo, prova a ricaricare la pagina.
+                <strong>Fix Applicato:</strong> Ora le lettere composte da più forme (come la "E" o lettere accentate) vengono fuse in un unico contorno prima di generare il file.
             </p>
         </div>
     </div>
@@ -93,21 +93,22 @@
         let updateTimer = null;
         let isReady = false;
 
-        // URL del font - USIAMO UN FILE .TTF (TrueType) invece di .WOFF2 per compatibilità
-        // Fonte: Google Fonts repo via jsDelivr CDN (molto affidabile)
-        const FONT_URL = 'https://cdn.jsdelivr.net/gh/google/fonts/apache/roboto/Roboto-Regular.ttf';
+        // Font URLs
+        const FONT_URLS = [
+            'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/fonts/Roboto/Roboto-Regular.ttf',
+            'https://cdn.jsdelivr.net/gh/google/fonts/apache/roboto/Roboto-Regular.ttf'
+        ];
 
-        // --- Funzioni di Utility UI ---
+        // --- Utility UI ---
         function setStatus(msg, type = 'info') {
             const el = document.getElementById('appStatus');
             el.innerText = msg;
-            if(type === 'error') {
-                el.className = "mb-4 p-3 bg-red-50 text-red-700 rounded-md text-sm border border-red-200";
-            } else if (type === 'success') {
-                el.className = "mb-4 p-3 bg-green-50 text-green-700 rounded-md text-sm border border-green-200";
-            } else {
-                el.className = "mb-4 p-3 bg-blue-50 text-blue-700 rounded-md text-sm border border-blue-200";
-            }
+            const colors = {
+                'error': 'bg-red-50 text-red-700 border-red-200',
+                'success': 'bg-green-50 text-green-700 border-green-200',
+                'info': 'bg-blue-50 text-blue-700 border-blue-200'
+            };
+            el.className = `mb-4 p-3 rounded-md text-sm border ${colors[type] || colors['info']}`;
         }
 
         function enableDownload(enable) {
@@ -123,63 +124,59 @@
             }
         }
 
-        // --- Inizializzazione ---
-        document.addEventListener('DOMContentLoaded', () => {
-            initApp();
-        });
+        // --- Init ---
+        document.addEventListener('DOMContentLoaded', () => { initApp(); });
 
-        function initApp() {
+        async function initApp() {
             try {
-                // Setup Paper.js
                 const canvas = document.getElementById('previewCanvas');
-                if(!canvas) throw new Error("Canvas non trovato nella pagina.");
+                if(!canvas) throw new Error("Canvas mancante.");
                 
                 paper.setup(canvas);
                 paperProject = paper.project;
 
-                setStatus("Caricamento Font (.ttf) in corso...", 'info');
+                setStatus("Caricamento Font...", 'info');
 
-                // Caricamento Font
-                opentype.load(FONT_URL, function(err, f) {
-                    if (err) {
-                        console.error(err);
-                        setStatus('Errore caricamento Font: ' + err, 'error');
-                    } else {
-                        font = f;
-                        isReady = true;
-                        setStatus('Sistema Pronto. Modifica il testo per generare.', 'success');
-                        // Primo render automatico
-                        updatePreview();
-                    }
-                });
+                let buffer = null;
+                for (const url of FONT_URLS) {
+                    try {
+                        const response = await fetch(url);
+                        if (response.ok) {
+                            buffer = await response.arrayBuffer();
+                            break;
+                        }
+                    } catch (e) { console.warn("Fallback font...", e); }
+                }
+
+                if (!buffer) throw new Error("Impossibile scaricare il font.");
+                
+                font = opentype.parse(buffer);
+                isReady = true;
+                setStatus('Sistema Pronto. Scrivi per generare.', 'success');
+                updatePreview();
 
             } catch(e) {
-                setStatus("Errore critico di inizializzazione: " + e.message, 'error');
+                console.error(e);
+                setStatus("Errore: " + e.message, 'error');
             }
         }
 
-        // --- Logica di Aggiornamento ---
+        // --- Logica Core ---
         window.scheduleUpdate = function() {
             if(!isReady) return;
             enableDownload(false);
-            document.getElementById('calcStatus').innerText = "Ricalcolo geometria...";
-            
+            document.getElementById('calcStatus').innerText = "Elaborazione...";
             if(updateTimer) clearTimeout(updateTimer);
-            updateTimer = setTimeout(updatePreview, 600); // 600ms delay
+            updateTimer = setTimeout(updatePreview, 600);
         }
 
         function updatePreview() {
             if (!font || !paperProject) return;
             
-            // Reset Canvas
             paperProject.activeLayer.removeChildren();
 
-            // Parametri input
-            const textVal = document.getElementById('inputText').value.toUpperCase(); // Forziamo maiuscolo per estetica laser
-            if(!textVal) {
-                setStatus("Inserisci un testo.", 'info');
-                return;
-            }
+            const textVal = document.getElementById('inputText').value.toUpperCase(); 
+            if(!textVal) { setStatus("Inserisci un testo.", 'info'); return; }
 
             const fontSize = parseInt(document.getElementById('fontSize').value) || 100;
             const spacing = parseFloat(document.getElementById('hatchSpacing').value) || 0.5;
@@ -187,78 +184,91 @@
             const showOutline = document.getElementById('includeOutline').checked;
 
             try {
-                // 1. Converti testo in tracciato (Path Data)
+                // 1. Genera tracciato grezzo
                 const pathData = font.getPath(textVal, 0, 0, fontSize).toPathData(2);
+                let rawTextItem = new paper.CompoundPath(pathData);
                 
-                // 2. Crea oggetto Paper.js (CompoundPath gestisce i buchi)
-                const textItem = new paper.CompoundPath(pathData);
-                textItem.fillColor = null; // Nessun riempimento solido
-                textItem.strokeColor = showOutline ? '#0000FF' : null; // Blu per contorno
-                textItem.strokeWidth = 1;
+                // 2. UNIONE BOOLEANA (Fix per lettere sovrapposte come la 'E')
+                // Questo passaggio fonde tutti i pezzi della lettera in un unico solido
+                let solidTextItem;
                 
-                // Centra nella vista
-                textItem.position = paper.view.center;
+                if (rawTextItem.children && rawTextItem.children.length > 0) {
+                    // Se ci sono più parti (es. buco della O, o rettangoli della E)
+                    // Partiamo dal primo pezzo e uniamo gli altri
+                    // Usiamo 'unite' che gestisce sia unioni che buchi (in base al winding)
+                    
+                    // Cloniamo il primo figlio per iniziare
+                    solidTextItem = rawTextItem.children[0].clone();
+                    
+                    for (let i = 1; i < rawTextItem.children.length; i++) {
+                        let nextPart = rawTextItem.children[i];
+                        // Eseguiamo l'unione booleana
+                        let united = solidTextItem.unite(nextPart);
+                        // Rimuoviamo il vecchio pezzo intermedio per non sporcare la memoria
+                        solidTextItem.remove(); 
+                        solidTextItem = united;
+                    }
+                } else {
+                    // Se è un tracciato semplice senza figli
+                    solidTextItem = rawTextItem.clone();
+                }
 
-                // 3. Generazione Campitura (Hatch)
-                // Strategia: Creare una griglia di linee enorme e tagliarla con la forma del testo
-                
-                const bounds = textItem.bounds;
-                // Calcolo dimensione diagonale per coprire tutto durante la rotazione
+                // Pulizia: rimuoviamo l'originale grezzo che potrebbe avere intersezioni
+                rawTextItem.remove();
+
+                // Impostiamo lo stile del testo unito
+                solidTextItem.fillColor = null;
+                solidTextItem.strokeColor = showOutline ? '#0000FF' : null;
+                solidTextItem.strokeWidth = 1.5;
+                solidTextItem.position = paper.view.center;
+
+                // 3. Campitura (Ray Casting su Geometria Pulita)
+                const bounds = solidTextItem.bounds;
                 const diag = Math.sqrt(bounds.width**2 + bounds.height**2);
                 const count = Math.ceil(diag / spacing) * 1.5;
-
-                // Gruppo temporaneo per le linee grezze
-                const rawLines = new paper.Group();
-                
-                // Generiamo linee verticali centrate sull'oggetto
                 const startX = bounds.center.x - (diag / 2);
                 
+                finalHatchGroup = new paper.Group();
+                finalOutlineGroup = solidTextItem; // Usiamo la versione unita per l'export
+
                 for(let i = 0; i < count; i++) {
                     const x = startX + (i * spacing);
-                    // Linea lunga quanto la diagonale
                     const p1 = new paper.Point(x, bounds.center.y - (diag / 2));
                     const p2 = new paper.Point(x, bounds.center.y + (diag / 2));
-                    const line = new paper.Path.Line(p1, p2);
-                    rawLines.addChild(line);
-                }
-
-                // Ruotiamo il gruppo di linee
-                // Nota: le linee sono verticali (90°). Se l'utente vuole 45°, ruotiamo di (45-90) = -45
-                // O semplicemente ruotiamo dell'angolo desiderato se partiamo da una base corretta.
-                // Ruotiamo tutto il blocco linee attorno al centro del testo
-                rawLines.rotate(angleDeg - 90, bounds.center);
-
-                // 4. Intersezione (Clipping)
-                // Usiamo intersect. Attenzione: Intersecare molte linee con un complex path può essere lento.
-                // Ottimizzazione: Usare intersect su tutto il gruppo spesso fallisce in JS puri.
-                // Meglio iterare.
-                
-                finalHatchGroup = new paper.Group(); // Contenitore finale
-                finalOutlineGroup = textItem; // Riferimento per export
-
-                const lines = rawLines.children;
-                // Rimuoviamo rawLines dalla scena visibile per non confondere
-                rawLines.remove(); 
-
-                // Processiamo ogni linea
-                for(let i=0; i<lines.length; i++) {
-                    const rawLine = lines[i];
-                    // La magia di Paper.js: interseca la linea infinita con la forma del testo
-                    // Restituisce solo i segmenti che stanno "sopra" il riempimento del testo (quindi gestisce i buchi)
-                    const clipped = textItem.intersect(rawLine, {trace: false});
                     
-                    if(clipped) {
-                        // Se l'intersezione esiste
-                        clipped.strokeColor = '#FF0000'; // Rosso per campitura
-                        clipped.strokeWidth = 1;
-                        finalHatchGroup.addChild(clipped);
+                    const rawLine = new paper.Path.Line(p1, p2);
+                    rawLine.rotate(angleDeg - 90, bounds.center);
+
+                    // Calcolo intersezioni sulla geometria pulita (solidTextItem)
+                    const intersections = rawLine.getIntersections(solidTextItem);
+                    
+                    if(intersections.length > 0) {
+                        const sortedIntersections = intersections.sort((a, b) => {
+                            return a.point.getDistance(rawLine.firstSegment.point) - b.point.getDistance(rawLine.firstSegment.point);
+                        });
+
+                        let pointsToCheck = [rawLine.firstSegment.point];
+                        sortedIntersections.forEach(int => pointsToCheck.push(int.point));
+                        pointsToCheck.push(rawLine.lastSegment.point);
+
+                        for(let j=0; j < pointsToCheck.length - 1; j++) {
+                            const segStart = pointsToCheck[j];
+                            const segEnd = pointsToCheck[j+1];
+                            const midPoint = segStart.add(segEnd).divide(2);
+
+                            // Verifica 'contains' sulla geometria unita
+                            if(solidTextItem.contains(midPoint)) {
+                                const hatchSegment = new paper.Path.Line(segStart, segEnd);
+                                hatchSegment.strokeColor = '#FF0000';
+                                hatchSegment.strokeWidth = 1;
+                                finalHatchGroup.addChild(hatchSegment);
+                            }
+                        }
                     }
+                    rawLine.remove();
                 }
 
-                // Se non vogliamo il contorno, nascondiamolo ma teniamolo in memoria per i calcoli
-                textItem.visible = showOutline;
-                
-                // Aggiorna vista
+                solidTextItem.visible = showOutline;
                 paper.view.draw();
                 
                 document.getElementById('calcStatus').innerText = "Pronto";
@@ -266,77 +276,54 @@
 
             } catch (err) {
                 console.error(err);
-                setStatus("Errore durante il calcolo geometrico: " + err.message, 'error');
+                setStatus("Errore calcolo: " + err.message, 'error');
             }
         }
 
-        // --- Generazione DXF ---
+        // --- Export DXF ---
         function downloadDXF() {
             if (!finalHatchGroup) return;
 
-            // Inizio costruzione file DXF
-            let dxf = "";
-            dxf += "0\nSECTION\n2\nHEADER\n0\nENDSEC\n";
-            dxf += "0\nSECTION\n2\nENTITIES\n";
+            let dxf = "0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n";
 
-            // Funzione helper per scrivere LINE nel DXF
             function writeLine(x1, y1, x2, y2, layer) {
-                // Invertiamo Y perché in Canvas Y cresce verso il basso, in DXF/CAD verso l'alto
-                // Se la tua macchina lo importa specchiato, prova a rimuovere il segno meno su y1/y2
-                dxf += "0\nLINE\n";
-                dxf += "8\n" + layer + "\n"; // Nome Layer
-                dxf += "10\n" + x1.toFixed(4) + "\n"; // X Start
-                dxf += "20\n" + (-y1).toFixed(4) + "\n"; // Y Start (Inverted)
-                dxf += "11\n" + x2.toFixed(4) + "\n"; // X End
-                dxf += "21\n" + (-y2).toFixed(4) + "\n"; // Y End (Inverted)
+                // Inversione Y per compatibilità CAD
+                dxf += "0\nLINE\n8\n" + layer + "\n";
+                dxf += "10\n" + x1.toFixed(4) + "\n20\n" + (-y1).toFixed(4) + "\n";
+                dxf += "11\n" + x2.toFixed(4) + "\n21\n" + (-y2).toFixed(4) + "\n";
             }
 
-            // 1. Esporta Campitura (Rosso) -> Layer "HATCH"
-            // Le intersezioni possono essere Path composti da più curve o segmenti
-            const items = finalHatchGroup.children;
-            for(let i=0; i<items.length; i++) {
-                const item = items[i];
-                // Paper.js a volte restituisce Path complessi anche per linee dritte intersecate
-                // Iteriamo sulle curve (che in realtà sono segmenti retti qui)
-                if(item.curves) {
-                    for(let c=0; c<item.curves.length; c++) {
-                        const curve = item.curves[c];
-                        writeLine(curve.point1.x, curve.point1.y, curve.point2.x, curve.point2.y, "HATCH");
-                    }
+            // Hatch
+            finalHatchGroup.children.forEach(item => {
+                if(item.segments && item.segments.length >= 2) {
+                    writeLine(item.segments[0].point.x, item.segments[0].point.y, 
+                             item.segments[1].point.x, item.segments[1].point.y, "HATCH");
                 }
-            }
+            });
 
-            // 2. Esporta Contorno (Blu) -> Layer "OUTLINE"
-            const showOutline = document.getElementById('includeOutline').checked;
-            if(showOutline && finalOutlineGroup) {
-                // Il contorno è curvo. Dobbiamo discretizzarlo in segmenti retti per compatibilità DXF R12
+            // Outline Unito
+            if(document.getElementById('includeOutline').checked && finalOutlineGroup) {
                 const flatOutline = finalOutlineGroup.clone();
-                flatOutline.flatten(0.5); // Converte curve in linee con tolleranza 0.5px
+                flatOutline.flatten(0.5); 
                 
-                // Funzione ricorsiva per gestire CompoundPath (es. lettere con buchi)
-                function processItem(node) {
-                    if(node.children) {
-                        node.children.forEach(processItem);
-                    } else if(node.segments) {
+                const processNode = (node) => {
+                    if(node.children) node.children.forEach(processNode);
+                    else if(node.segments) {
                         for(let s=0; s<node.segments.length; s++) {
                             const p1 = node.segments[s].point;
-                            // Collega al prossimo punto (o al primo se chiuso)
                             const nextIdx = (s + 1) % node.segments.length;
-                            // Se non è chiuso e siamo alla fine, stop
                             if(!node.closed && nextIdx === 0) continue;
-                            
                             const p2 = node.segments[nextIdx].point;
                             writeLine(p1.x, p1.y, p2.x, p2.y, "OUTLINE");
                         }
                     }
-                }
-                processItem(flatOutline);
-                flatOutline.remove(); // Pulizia memoria
+                };
+                processNode(flatOutline);
+                flatOutline.remove();
             }
 
             dxf += "0\nENDSEC\n0\nEOF\n";
 
-            // Download
             const blob = new Blob([dxf], {type: 'application/dxf'});
             const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
