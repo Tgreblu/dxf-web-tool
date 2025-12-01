@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generatore DXF per Laser - Parabiago Edition</title>
+    <title>Generatore DXF Laser - Parabiago Edition</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Paper.js -->
@@ -12,78 +12,102 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/opentype.js/1.3.4/opentype.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        /* Altezza fissa per il canvas per evitare glitch di ridimensionamento */
-        canvas[resize] { width: 100%; height: 400px; border: 1px solid #ccc; background-color: #fff; }
+        canvas[resize] { width: 100%; height: 500px; border: 1px solid #ccc; background-color: #fff; }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen p-4">
 
-    <div class="max-w-4xl mx-auto bg-white rounded-lg shadow-lg p-6">
+    <div class="max-w-6xl mx-auto bg-white rounded-lg shadow-lg p-6">
         <h1 class="text-2xl font-bold text-gray-800 mb-2">Generatore Campitura Laser (DXF R13)</h1>
         
-        <!-- Area Stato/Errori -->
         <div id="appStatus" class="mb-4 p-3 bg-blue-50 text-blue-700 rounded-md text-sm border border-blue-200">
             Inizializzazione sistema...
         </div>
 
-        <p class="text-gray-600 mb-6 text-sm">
-            Inserisci il testo. Il sistema unirà automaticamente le geometrie sovrapposte (Boolean Union) per creare un outline pulito.
-        </p>
+        <!-- Tab Selezione Modalità -->
+        <div class="flex border-b border-gray-200 mb-6">
+            <button onclick="switchMode('text')" id="tabText" class="px-6 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600 focus:outline-none">
+                Modalità Testo
+            </button>
+            <button onclick="switchMode('svg')" id="tabSvg" class="px-6 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none">
+                Modalità Disegno (SVG)
+            </button>
+        </div>
 
-        <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
-            <!-- Controlli -->
-            <div class="space-y-4">
-                <div>
-                    <label class="block text-sm font-medium text-gray-700">Testo da marcare</label>
-                    <input type="text" id="inputText" value="PARABIAGO" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:border-blue-500 focus:ring-blue-500" oninput="scheduleUpdate()">
-                </div>
-
-                <div class="grid grid-cols-2 gap-4">
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Spaziatura Linee (mm)</label>
-                        <input type="number" id="hatchSpacing" value="0.5" step="0.1" min="0.1" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" onchange="scheduleUpdate()">
-                    </div>
-                    <div>
-                        <label class="block text-sm font-medium text-gray-700">Angolo (gradi)</label>
-                        <input type="number" id="hatchAngle" value="45" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" onchange="scheduleUpdate()">
-                    </div>
-                </div>
-
-                <div>
-                     <label class="block text-sm font-medium text-gray-700">Dimensione Testo (px/unità)</label>
-                     <input type="number" id="fontSize" value="150" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" onchange="scheduleUpdate()">
-                </div>
+        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+            
+            <!-- Colonna Controlli -->
+            <div class="space-y-6 lg:col-span-1">
                 
-                <div class="flex items-center space-x-2 mt-2">
-                     <input type="checkbox" id="includeOutline" checked onchange="scheduleUpdate()" class="rounded text-blue-600 focus:ring-blue-500">
-                     <label for="includeOutline" class="text-sm text-gray-700">Includi Perimetro (Contorno Unito)</label>
+                <!-- Input Testo -->
+                <div id="textControls">
+                    <label class="block text-sm font-medium text-gray-700">Testo da marcare</label>
+                    <input type="text" id="inputText" value="PARABIAGO" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:border-blue-500" oninput="scheduleUpdate()">
+                    
+                    <label class="block text-sm font-medium text-gray-700 mt-4">Dimensione Testo (px)</label>
+                    <input type="number" id="fontSize" value="150" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" onchange="scheduleUpdate()">
                 </div>
 
-                <div class="pt-4">
-                    <button id="btnDownload" onclick="downloadDXF()" disabled class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-gray-400 cursor-not-allowed transition-colors">
-                        <svg class="h-5 w-5 mr-2" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4"></path></svg>
-                        Scarica File DXF
+                <!-- Input File SVG -->
+                <div id="svgControls" class="hidden">
+                    <label class="block text-sm font-medium text-gray-700">Carica File SVG (da Illustrator)</label>
+                    <div class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:bg-gray-50 transition-colors cursor-pointer" onclick="document.getElementById('fileInput').click()">
+                        <div class="space-y-1 text-center">
+                            <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
+                                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+                            </svg>
+                            <div class="text-sm text-gray-600">
+                                <span class="font-medium text-blue-600 hover:text-blue-500">Carica un file</span>
+                            </div>
+                            <p class="text-xs text-gray-500">SVG fino a 2MB</p>
+                        </div>
+                    </div>
+                    <input type="file" id="fileInput" accept=".svg" class="hidden" onchange="handleFileUpload(this)">
+                    <p id="fileNameDisplay" class="text-sm text-gray-600 mt-2 italic"></p>
+                </div>
+
+                <!-- Parametri Comuni -->
+                <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
+                    <h3 class="text-sm font-bold text-gray-700 mb-3">Parametri Campitura</h3>
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500">Passo (mm)</label>
+                            <input type="number" id="hatchSpacing" value="0.5" step="0.1" min="0.1" class="mt-1 w-full p-2 border rounded" onchange="scheduleUpdate()">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-medium text-gray-500">Angolo (°)</label>
+                            <input type="number" id="hatchAngle" value="45" class="mt-1 w-full p-2 border rounded" onchange="scheduleUpdate()">
+                        </div>
+                    </div>
+                    <div class="mt-3 flex items-center">
+                        <input type="checkbox" id="includeOutline" checked onchange="scheduleUpdate()" class="h-4 w-4 text-blue-600 rounded">
+                        <label for="includeOutline" class="ml-2 block text-sm text-gray-700">Includi Perimetro (Blu)</label>
+                    </div>
+                </div>
+
+                <div class="pt-2">
+                    <button id="btnDownload" onclick="downloadDXF()" disabled class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-bold text-white bg-gray-400 cursor-not-allowed transition-colors">
+                        Scarica DXF
                     </button>
-                    <p id="calcStatus" class="text-xs text-center mt-2 text-gray-500"></p>
+                    <p id="calcStatus" class="text-xs text-center mt-2 text-gray-500 h-4"></p>
                 </div>
             </div>
 
-            <!-- Preview -->
-            <div>
-                <label class="block text-sm font-medium text-gray-700 mb-1">Anteprima (Rosso=Hatch, Blu=Outline Unito)</label>
-                <!-- Canvas Paper.js -->
+            <!-- Preview Canvas -->
+            <div class="lg:col-span-2 bg-gray-50 rounded-lg border border-gray-200 p-1 flex flex-col">
+                <div class="flex justify-between items-center px-2 py-1 bg-white border-b mb-1">
+                    <span class="text-xs font-semibold text-gray-500">ANTEPRIMA</span>
+                    <div class="text-xs space-x-2">
+                        <span class="inline-block w-3 h-3 bg-red-500 rounded-full"></span> <span class="text-gray-600">Hatch</span>
+                        <span class="inline-block w-3 h-3 bg-blue-600 rounded-full"></span> <span class="text-gray-600">Outline</span>
+                    </div>
+                </div>
                 <canvas id="previewCanvas" resize></canvas>
             </div>
         </div>
-        
-        <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 mt-4">
-            <p class="text-sm text-yellow-700">
-                <strong>Fix Applicato:</strong> Ora le lettere composte da più forme (come la "E" o lettere accentate) vengono fuse in un unico contorno prima di generare il file.
-            </p>
-        </div>
     </div>
 
-    <!-- Logica Applicativa -->
+    <!-- Script -->
     <script type="text/javascript">
         // --- Variabili Globali ---
         let font = null;
@@ -92,14 +116,35 @@
         let finalOutlineGroup = null;
         let updateTimer = null;
         let isReady = false;
+        let currentMode = 'text'; // 'text' o 'svg'
+        let importedSVGItem = null;
 
-        // Font URLs
+        // Font Backup
         const FONT_URLS = [
             'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/fonts/Roboto/Roboto-Regular.ttf',
             'https://cdn.jsdelivr.net/gh/google/fonts/apache/roboto/Roboto-Regular.ttf'
         ];
 
-        // --- Utility UI ---
+        // --- UI Logic ---
+        function switchMode(mode) {
+            currentMode = mode;
+            document.getElementById('textControls').classList.toggle('hidden', mode !== 'text');
+            document.getElementById('svgControls').classList.toggle('hidden', mode !== 'svg');
+            
+            // Aggiorna stile tab
+            const tabText = document.getElementById('tabText');
+            const tabSvg = document.getElementById('tabSvg');
+            
+            if (mode === 'text') {
+                tabText.className = "px-6 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600 focus:outline-none";
+                tabSvg.className = "px-6 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none";
+            } else {
+                tabSvg.className = "px-6 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600 focus:outline-none";
+                tabText.className = "px-6 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none";
+            }
+            scheduleUpdate();
+        }
+
         function setStatus(msg, type = 'info') {
             const el = document.getElementById('appStatus');
             el.innerText = msg;
@@ -124,112 +169,156 @@
             }
         }
 
+        function handleFileUpload(input) {
+            const file = input.files[0];
+            if (file) {
+                document.getElementById('fileNameDisplay').innerText = "File: " + file.name;
+                const reader = new FileReader();
+                reader.onload = function(e) {
+                    // Importa SVG in Paper.js
+                    paperProject.importSVG(e.target.result, {
+                        expandShapes: true,
+                        insert: false,
+                        onLoad: function(item) {
+                            importedSVGItem = item;
+                            scheduleUpdate();
+                        }
+                    });
+                };
+                reader.readAsText(file);
+            }
+        }
+
         // --- Init ---
-        document.addEventListener('DOMContentLoaded', () => { initApp(); });
+        document.addEventListener('DOMContentLoaded', initApp);
 
         async function initApp() {
             try {
-                const canvas = document.getElementById('previewCanvas');
-                if(!canvas) throw new Error("Canvas mancante.");
-                
-                paper.setup(canvas);
+                paper.setup(document.getElementById('previewCanvas'));
                 paperProject = paper.project;
 
-                setStatus("Caricamento Font...", 'info');
-
+                // Download Font per modalità testo
                 let buffer = null;
                 for (const url of FONT_URLS) {
                     try {
                         const response = await fetch(url);
-                        if (response.ok) {
-                            buffer = await response.arrayBuffer();
-                            break;
-                        }
-                    } catch (e) { console.warn("Fallback font...", e); }
+                        if (response.ok) { buffer = await response.arrayBuffer(); break; }
+                    } catch (e) {}
                 }
-
-                if (!buffer) throw new Error("Impossibile scaricare il font.");
-                
-                font = opentype.parse(buffer);
-                isReady = true;
-                setStatus('Sistema Pronto. Scrivi per generare.', 'success');
-                updatePreview();
-
+                if (buffer) {
+                    font = opentype.parse(buffer);
+                    isReady = true;
+                    setStatus('Pronto. Inserisci testo o carica SVG.', 'success');
+                    scheduleUpdate();
+                } else {
+                    throw new Error("Font non caricato.");
+                }
             } catch(e) {
-                console.error(e);
-                setStatus("Errore: " + e.message, 'error');
+                setStatus("Errore Init: " + e.message, 'error');
             }
         }
 
-        // --- Logica Core ---
         window.scheduleUpdate = function() {
             if(!isReady) return;
             enableDownload(false);
-            document.getElementById('calcStatus').innerText = "Elaborazione...";
+            document.getElementById('calcStatus').innerText = "Calcolo...";
             if(updateTimer) clearTimeout(updateTimer);
-            updateTimer = setTimeout(updatePreview, 600);
+            updateTimer = setTimeout(processGeometry, 500);
         }
 
-        function updatePreview() {
-            if (!font || !paperProject) return;
-            
-            paperProject.activeLayer.removeChildren();
+        // --- Core Processing Logic ---
+        function processGeometry() {
+            if (!paperProject) return;
+            paperProject.activeLayer.removeChildren(); // Pulisci scena
 
-            const textVal = document.getElementById('inputText').value.toUpperCase(); 
-            if(!textVal) { setStatus("Inserisci un testo.", 'info'); return; }
+            let sourceItem = null;
 
-            const fontSize = parseInt(document.getElementById('fontSize').value) || 100;
-            const spacing = parseFloat(document.getElementById('hatchSpacing').value) || 0.5;
-            const angleDeg = parseFloat(document.getElementById('hatchAngle').value) || 45;
-            const showOutline = document.getElementById('includeOutline').checked;
+            // 1. Acquisizione Geometria (Testo o SVG)
+            if (currentMode === 'text') {
+                const textVal = document.getElementById('inputText').value.toUpperCase();
+                if(!textVal) { setStatus("Inserisci testo", 'info'); return; }
+                
+                const fontSize = parseInt(document.getElementById('fontSize').value) || 100;
+                const pathData = font.getPath(textVal, 0, 0, fontSize).toPathData(2);
+                sourceItem = new paper.CompoundPath(pathData);
+                sourceItem.position = paper.view.center;
+            } else {
+                if(!importedSVGItem) { setStatus("Carica un SVG", 'info'); return; }
+                // Clona l'SVG importato per non modificarne l'originale in memoria
+                sourceItem = importedSVGItem.clone();
+                // Adatta SVG alla vista se troppo grande/piccolo (opzionale, ma aiuta la UX)
+                sourceItem.position = paper.view.center;
+                
+                // Opzionale: Scala se enorme
+                if(sourceItem.bounds.width > 3000) sourceItem.scale(0.1); 
+            }
 
             try {
-                // 1. Genera tracciato grezzo
-                const pathData = font.getPath(textVal, 0, 0, fontSize).toPathData(2);
-                let rawTextItem = new paper.CompoundPath(pathData);
+                // 2. UNIONE BOOLEANA (Cruciale per SVG complessi e lettere sovrapposte)
+                // Applichiamo unite() per fondere tutto in un unico perimetro pulito
+                // Per SVG complessi con gruppi annidati, dobbiamo assicurarci che sia tutto appiattito
                 
-                // 2. UNIONE BOOLEANA (Fix per lettere sovrapposte come la 'E')
-                // Questo passaggio fonde tutti i pezzi della lettera in un unico solido
-                let solidTextItem;
-                
-                if (rawTextItem.children && rawTextItem.children.length > 0) {
-                    // Se ci sono più parti (es. buco della O, o rettangoli della E)
-                    // Partiamo dal primo pezzo e uniamo gli altri
-                    // Usiamo 'unite' che gestisce sia unioni che buchi (in base al winding)
-                    
-                    // Cloniamo il primo figlio per iniziare
-                    solidTextItem = rawTextItem.children[0].clone();
-                    
-                    for (let i = 1; i < rawTextItem.children.length; i++) {
-                        let nextPart = rawTextItem.children[i];
-                        // Eseguiamo l'unione booleana
-                        let united = solidTextItem.unite(nextPart);
-                        // Rimuoviamo il vecchio pezzo intermedio per non sporcare la memoria
-                        solidTextItem.remove(); 
-                        solidTextItem = united;
+                // Funzione ricorsiva per estrarre tutti i path dall'SVG
+                function getAllPaths(item) {
+                    let paths = [];
+                    if (item.className === 'Path' || item.className === 'CompoundPath') {
+                        paths.push(item);
+                    } else if (item.children) {
+                        for (let child of item.children) {
+                            paths = paths.concat(getAllPaths(child));
+                        }
                     }
-                } else {
-                    // Se è un tracciato semplice senza figli
-                    solidTextItem = rawTextItem.clone();
+                    return paths;
                 }
 
-                // Pulizia: rimuoviamo l'originale grezzo che potrebbe avere intersezioni
-                rawTextItem.remove();
+                let solidItem;
+                
+                if (currentMode === 'svg') {
+                    // Logica specifica per SVG: uniamo tutti i path trovati
+                    // Attenzione: operazioni booleane su SVG complessi possono essere pesanti
+                    const allPaths = getAllPaths(sourceItem);
+                    if (allPaths.length > 0) {
+                        solidItem = allPaths[0]; // Inizia col primo
+                        // Unisci gli altri. Nota: se i path sono disgiunti, unite() crea un CompoundPath
+                        for(let k=1; k<allPaths.length; k++) {
+                            // Semplificazione: se l'SVG ha riempimenti, li usiamo
+                            let temp = solidItem.unite(allPaths[k]);
+                            // Rimuovi vecchi riferimenti per pulire memoria
+                            if(solidItem !== allPaths[0]) solidItem.remove(); 
+                            solidItem = temp;
+                        }
+                        sourceItem.remove(); // Rimuovi l'originale grezzo
+                    } else {
+                         setStatus("Nessun tracciato valido trovato nell'SVG", 'error');
+                         return;
+                    }
+                } else {
+                    // Logica testo (già collaudata)
+                    solidItem = sourceItem.unite();
+                    sourceItem.remove();
+                }
 
-                // Impostiamo lo stile del testo unito
-                solidTextItem.fillColor = null;
-                solidTextItem.strokeColor = showOutline ? '#0000FF' : null;
-                solidTextItem.strokeWidth = 1.5;
-                solidTextItem.position = paper.view.center;
+                // 3. Setup Outline Visivo
+                solidItem.position = paper.view.center;
+                solidItem.fillColor = null; // Rimuovi riempimenti importati
+                
+                let visualOutline = solidItem.clone();
+                visualOutline.strokeColor = '#0000FF'; // Blu
+                visualOutline.strokeWidth = 1.5;
+                visualOutline.visible = document.getElementById('includeOutline').checked;
+                
+                finalOutlineGroup = visualOutline;
 
-                // 3. Campitura (Ray Casting su Geometria Pulita)
-                const bounds = solidTextItem.bounds;
+                // 4. Ray Casting Hatching (Algoritmo Robusto)
+                const spacing = parseFloat(document.getElementById('hatchSpacing').value) || 0.5;
+                const angle = parseFloat(document.getElementById('hatchAngle').value) || 45;
+                
+                const bounds = solidItem.bounds;
                 const diag = Math.sqrt(bounds.width**2 + bounds.height**2);
                 const count = Math.ceil(diag / spacing) * 1.5;
                 const startX = bounds.center.x - (diag / 2);
-                
+
                 finalHatchGroup = new paper.Group();
-                finalOutlineGroup = solidTextItem; // Usiamo la versione unita per l'export
 
                 for(let i = 0; i < count; i++) {
                     const x = startX + (i * spacing);
@@ -237,98 +326,83 @@
                     const p2 = new paper.Point(x, bounds.center.y + (diag / 2));
                     
                     const rawLine = new paper.Path.Line(p1, p2);
-                    rawLine.rotate(angleDeg - 90, bounds.center);
+                    rawLine.rotate(angle - 90, bounds.center);
 
-                    // Calcolo intersezioni sulla geometria pulita (solidTextItem)
-                    const intersections = rawLine.getIntersections(solidTextItem);
+                    const intersections = rawLine.getIntersections(solidItem);
                     
                     if(intersections.length > 0) {
-                        const sortedIntersections = intersections.sort((a, b) => {
-                            return a.point.getDistance(rawLine.firstSegment.point) - b.point.getDistance(rawLine.firstSegment.point);
-                        });
+                        const sorted = intersections.sort((a, b) => 
+                            a.point.getDistance(rawLine.firstSegment.point) - b.point.getDistance(rawLine.firstSegment.point)
+                        );
 
-                        let pointsToCheck = [rawLine.firstSegment.point];
-                        sortedIntersections.forEach(int => pointsToCheck.push(int.point));
-                        pointsToCheck.push(rawLine.lastSegment.point);
-
-                        for(let j=0; j < pointsToCheck.length - 1; j++) {
-                            const segStart = pointsToCheck[j];
-                            const segEnd = pointsToCheck[j+1];
-                            const midPoint = segStart.add(segEnd).divide(2);
-
-                            // Verifica 'contains' sulla geometria unita
-                            if(solidTextItem.contains(midPoint)) {
-                                const hatchSegment = new paper.Path.Line(segStart, segEnd);
-                                hatchSegment.strokeColor = '#FF0000';
-                                hatchSegment.strokeWidth = 1;
-                                finalHatchGroup.addChild(hatchSegment);
+                        // Crea segmenti
+                        let points = [rawLine.firstSegment.point, ...sorted.map(i=>i.point), rawLine.lastSegment.point];
+                        
+                        for(let j=0; j < points.length - 1; j++) {
+                            const mid = points[j].add(points[j+1]).divide(2);
+                            if(solidItem.contains(mid)) {
+                                const seg = new paper.Path.Line(points[j], points[j+1]);
+                                seg.strokeColor = '#FF0000';
+                                finalHatchGroup.addChild(seg);
                             }
                         }
                     }
                     rawLine.remove();
                 }
 
-                solidTextItem.visible = showOutline;
-                paper.view.draw();
+                // Rimuovi l'oggetto solido di calcolo (non visibile)
+                solidItem.remove();
                 
+                paper.view.draw();
+                setStatus("Elaborazione completata", 'success');
                 document.getElementById('calcStatus').innerText = "Pronto";
                 enableDownload(true);
 
-            } catch (err) {
-                console.error(err);
-                setStatus("Errore calcolo: " + err.message, 'error');
+            } catch(e) {
+                console.error(e);
+                setStatus("Errore geometria: " + e.message, 'error');
             }
         }
 
-        // --- Export DXF ---
+        // --- DXF Export ---
         function downloadDXF() {
             if (!finalHatchGroup) return;
-
             let dxf = "0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n";
 
             function writeLine(x1, y1, x2, y2, layer) {
-                // Inversione Y per compatibilità CAD
-                dxf += "0\nLINE\n8\n" + layer + "\n";
-                dxf += "10\n" + x1.toFixed(4) + "\n20\n" + (-y1).toFixed(4) + "\n";
-                dxf += "11\n" + x2.toFixed(4) + "\n21\n" + (-y2).toFixed(4) + "\n";
+                dxf += `0\nLINE\n8\n${layer}\n10\n${x1.toFixed(4)}\n20\n${(-y1).toFixed(4)}\n11\n${x2.toFixed(4)}\n21\n${(-y2).toFixed(4)}\n`;
             }
 
-            // Hatch
-            finalHatchGroup.children.forEach(item => {
-                if(item.segments && item.segments.length >= 2) {
-                    writeLine(item.segments[0].point.x, item.segments[0].point.y, 
-                             item.segments[1].point.x, item.segments[1].point.y, "HATCH");
-                }
+            // Esporta Hatch
+            finalHatchGroup.children.forEach(c => {
+                if(c.segments && c.segments.length >= 2) 
+                    writeLine(c.firstSegment.point.x, c.firstSegment.point.y, c.lastSegment.point.x, c.lastSegment.point.y, "HATCH");
             });
 
-            // Outline Unito
+            // Esporta Outline
             if(document.getElementById('includeOutline').checked && finalOutlineGroup) {
-                const flatOutline = finalOutlineGroup.clone();
-                flatOutline.flatten(0.5); 
-                
-                const processNode = (node) => {
-                    if(node.children) node.children.forEach(processNode);
-                    else if(node.segments) {
-                        for(let s=0; s<node.segments.length; s++) {
-                            const p1 = node.segments[s].point;
-                            const nextIdx = (s + 1) % node.segments.length;
-                            if(!node.closed && nextIdx === 0) continue;
-                            const p2 = node.segments[nextIdx].point;
-                            writeLine(p1.x, p1.y, p2.x, p2.y, "OUTLINE");
+                const flat = finalOutlineGroup.clone();
+                flat.flatten(0.1); // Alta precisione
+                const process = (n) => {
+                    if(n.children) n.children.forEach(process);
+                    else if(n.segments) {
+                        for(let i=0; i<n.segments.length; i++) {
+                            const p1 = n.segments[i].point;
+                            const next = (i+1)%n.segments.length;
+                            if(!n.closed && next===0) continue;
+                            writeLine(p1.x, p1.y, n.segments[next].point.x, n.segments[next].point.y, "OUTLINE");
                         }
                     }
                 };
-                processNode(flatOutline);
-                flatOutline.remove();
+                process(flat);
+                flat.remove();
             }
 
             dxf += "0\nENDSEC\n0\nEOF\n";
-
             const blob = new Blob([dxf], {type: 'application/dxf'});
-            const url = URL.createObjectURL(blob);
             const link = document.createElement('a');
-            link.href = url;
-            link.download = "Laser_" + document.getElementById('inputText').value + ".dxf";
+            link.href = URL.createObjectURL(blob);
+            link.download = "LaserJob.dxf";
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
