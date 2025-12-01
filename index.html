@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generatore DXF Laser v1.1</title>
+    <title>Generatore DXF Laser v1.5</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Paper.js -->
@@ -14,13 +14,17 @@
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
         /* Altezza fissa per il canvas */
         canvas[resize] { width: 100%; height: 500px; border: 1px solid #ccc; background-color: #fff; }
+        /* Stile barra di progresso */
+        #progressContainer { display: none; width: 100%; background-color: #e5e7eb; border-radius: 9999px; height: 14px; margin-top: 10px; overflow: hidden; position: relative; }
+        #progressBar { height: 100%; background-color: #3b82f6; width: 0%; transition: width 0.1s linear; }
+        #progressTextOverlay { position: absolute; width: 100%; text-align: center; font-size: 10px; color: #333; line-height: 14px; font-weight: bold; top:0; left:0; }
     </style>
 </head>
 <body class="bg-gray-100 min-h-screen p-4">
 
     <div class="max-w-6xl mx-auto bg-white rounded-lg shadow-lg p-6">
         <div class="flex justify-between items-center mb-4">
-            <h1 class="text-2xl font-bold text-gray-800">Generatore DXF Laser <span class="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-1 rounded-full ml-2">v1.1</span></h1>
+            <h1 class="text-2xl font-bold text-gray-800">Generatore DXF Laser <span class="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-1 rounded-full ml-2">v1.5 (Async-Core)</span></h1>
         </div>
         
         <div id="appStatus" class="mb-4 p-3 bg-blue-50 text-blue-700 rounded-md text-sm border border-blue-200">
@@ -66,29 +70,27 @@
                         </div>
                     </div>
                     <input type="file" id="fileInput" accept=".svg" class="hidden" onchange="handleFileUpload(this)">
-                    <p id="fileNameDisplay" class="text-sm text-gray-600 mt-2 italic"></p>
+                    <p id="fileNameDisplay" class="text-sm text-gray-600 mt-2 italic font-semibold text-blue-600"></p>
+                    <p id="fileSizeInfo" class="text-xs text-gray-500 mt-1"></p>
                 </div>
 
                 <!-- Parametri Comuni -->
                 <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
                     <h3 class="text-sm font-bold text-gray-700 mb-3">Impostazioni Visualizzazione</h3>
                     
-                    <!-- Toggle Campitura -->
                     <div class="flex items-center mb-3">
                         <input type="checkbox" id="showHatch" checked onchange="toggleVisibilityOnly()" class="h-4 w-4 text-red-600 rounded focus:ring-red-500">
                         <label for="showHatch" class="ml-2 block text-sm text-gray-700">Mostra Campitura (Anteprima)</label>
                     </div>
 
-                    <!-- Toggle Outline e Spessore -->
                     <div class="flex items-center mb-2">
                         <input type="checkbox" id="includeOutline" checked onchange="toggleVisibilityOnly()" class="h-4 w-4 text-blue-600 rounded focus:ring-blue-500">
                         <label for="includeOutline" class="ml-2 block text-sm text-gray-700">Includi Perimetro (Blu)</label>
                     </div>
                     
-                    <!-- Nuovo Toggle Spessore Extra -->
                     <div class="flex items-center ml-6 mb-4">
                         <input type="checkbox" id="extraThick" onchange="toggleVisibilityOnly()" class="h-4 w-4 text-blue-400 rounded focus:ring-blue-400">
-                        <label for="extraThick" class="ml-2 block text-xs text-gray-500 font-medium">Outline Extra Spesso (per SVG grandi)</label>
+                        <label for="extraThick" class="ml-2 block text-xs text-gray-500 font-medium">Outline Extra Spesso</label>
                     </div>
 
                     <hr class="border-gray-200 my-3">
@@ -110,6 +112,11 @@
                     <button id="btnDownload" onclick="downloadDXF()" disabled class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-bold text-white bg-gray-400 cursor-not-allowed transition-colors">
                         Scarica DXF
                     </button>
+                    <!-- Progress Bar -->
+                    <div id="progressContainer">
+                        <div id="progressBar"></div>
+                        <div id="progressTextOverlay"></div>
+                    </div>
                     <p id="calcStatus" class="text-xs text-center mt-2 text-gray-500 h-4"></p>
                 </div>
             </div>
@@ -123,7 +130,6 @@
                         <span class="inline-block w-3 h-3 bg-blue-600 rounded-full"></span> <span class="text-gray-600">Outline</span>
                     </div>
                 </div>
-                <!-- Container Canvas per gestire resize -->
                 <div class="flex-grow relative w-full h-full">
                     <canvas id="previewCanvas" resize></canvas>
                 </div>
@@ -140,10 +146,11 @@
         let finalOutlineGroup = null;
         let updateTimer = null;
         let isReady = false;
-        let currentMode = 'text'; // 'text' o 'svg'
+        let currentMode = 'text'; 
         let importedSVGItem = null;
+        let isCalculating = false; 
+        let calculationQueueId = 0; 
 
-        // Font Backup
         const FONT_URLS = [
             'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/fonts/Roboto/Roboto-Regular.ttf',
             'https://cdn.jsdelivr.net/gh/google/fonts/apache/roboto/Roboto-Regular.ttf'
@@ -174,7 +181,8 @@
             const colors = {
                 'error': 'bg-red-50 text-red-700 border-red-200',
                 'success': 'bg-green-50 text-green-700 border-green-200',
-                'info': 'bg-blue-50 text-blue-700 border-blue-200'
+                'info': 'bg-blue-50 text-blue-700 border-blue-200',
+                'warn': 'bg-yellow-50 text-yellow-700 border-yellow-200'
             };
             el.className = `mb-4 p-3 rounded-md text-sm border ${colors[type] || colors['info']}`;
         }
@@ -192,10 +200,28 @@
             }
         }
 
+        function updateProgress(percent, text) {
+            const container = document.getElementById('progressContainer');
+            const bar = document.getElementById('progressBar');
+            const overlay = document.getElementById('progressTextOverlay');
+            
+            if (percent < 0) {
+                container.style.display = 'none';
+                overlay.innerText = "";
+            } else {
+                container.style.display = 'block';
+                const p = Math.min(100, Math.max(0, percent));
+                bar.style.width = p + '%';
+                if(text) overlay.innerText = text;
+            }
+        }
+
         function handleFileUpload(input) {
             const file = input.files[0];
             if (file) {
                 document.getElementById('fileNameDisplay').innerText = "File: " + file.name;
+                setStatus("Caricamento SVG...", 'info');
+                
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     paperProject.importSVG(e.target.result, {
@@ -203,7 +229,15 @@
                         insert: false,
                         onLoad: function(item) {
                             importedSVGItem = item;
+                            const b = item.bounds;
+                            const w = Math.round(b.width);
+                            const h = Math.round(b.height);
+                            document.getElementById('fileSizeInfo').innerText = `Dimensioni rilevate: ${w} x ${h} px`;
+                            setStatus("File in memoria. Inizio elaborazione...", 'info');
                             scheduleUpdate();
+                        },
+                        onError: function(e) {
+                            setStatus("Errore importazione SVG: " + e, 'error');
                         }
                     });
                 };
@@ -211,7 +245,6 @@
             }
         }
 
-        // Funzione rapida per aggiornare solo visibilità senza ricalcolare tutto
         function toggleVisibilityOnly() {
             if(!finalHatchGroup || !finalOutlineGroup) return;
 
@@ -222,13 +255,11 @@
             finalHatchGroup.visible = showHatch;
             finalOutlineGroup.visible = showOutline;
             
-            // Gestione spessore outline
             if (extraThick) {
-                finalOutlineGroup.strokeWidth = 6; // Molto spesso
+                finalOutlineGroup.strokeWidth = 6;
             } else {
-                finalOutlineGroup.strokeWidth = 1.5; // Normale
+                finalOutlineGroup.strokeWidth = 1.5;
             }
-            // Forziamo strokeScaling a false sempre, per evitare problemi con zoom
             finalOutlineGroup.strokeScaling = false;
 
             paper.view.draw();
@@ -264,177 +295,229 @@
         }
 
         window.scheduleUpdate = function() {
-            if(!isReady) return;
+            if(!isReady) return; 
+            calculationQueueId++;
             enableDownload(false);
-            document.getElementById('calcStatus').innerText = "Calcolo...";
             if(updateTimer) clearTimeout(updateTimer);
-            updateTimer = setTimeout(processGeometry, 500);
+            updateTimer = setTimeout(prepareAndCalculate, 500);
         }
 
-        // --- Core Processing Logic ---
-        function processGeometry() {
+        // --- CORE ASYNC PIPELINE ---
+        
+        async function prepareAndCalculate() {
+            const currentId = calculationQueueId;
             if (!paperProject) return;
-            paperProject.activeLayer.removeChildren(); // Pulisci scena
-
-            // Reset zoom
+            
+            isCalculating = true;
+            paperProject.activeLayer.removeChildren();
             paper.view.zoom = 1;
             paper.view.center = new paper.Point(0,0);
 
-            let sourceItem = null;
-
-            // 1. Acquisizione Geometria
-            if (currentMode === 'text') {
-                const textVal = document.getElementById('inputText').value.toUpperCase();
-                if(!textVal) { setStatus("Inserisci testo", 'info'); return; }
-                const fontSize = parseInt(document.getElementById('fontSize').value) || 100;
-                const pathData = font.getPath(textVal, 0, 0, fontSize).toPathData(2);
-                sourceItem = new paper.CompoundPath(pathData);
-            } else {
-                if(!importedSVGItem) { setStatus("Carica un SVG", 'info'); return; }
-                sourceItem = importedSVGItem.clone();
-            }
-
-            sourceItem.position = new paper.Point(0,0);
-
             try {
                 let solidItem;
-
-                if (currentMode === 'svg') {
-                    // FIX v1.1: Logica "Reorient" per SVG con buchi (ingranaggi)
-                    // Invece di unire i path, li mettiamo tutti in un unico CompoundPath e usiamo reorient()
-                    // Questo usa la regola Non-Zero/Even-Odd per determinare i buchi automaticamente.
-                    
-                    // 1. Appiattisci tutto in una lista di Path semplici
-                    function getAllFlatPaths(item) {
-                        let paths = [];
-                        if (item.className === 'Path') {
-                            paths.push(item.clone()); // Cloniamo per sicurezza
-                        } else if (item.children) {
-                            for (let child of item.children) {
-                                paths = paths.concat(getAllFlatPaths(child));
-                            }
-                        }
-                        return paths;
-                    }
-
-                    const flatPaths = getAllFlatPaths(sourceItem);
-                    
-                    if (flatPaths.length > 0) {
-                        // 2. Crea un CompoundPath unico con tutti i tracciati
-                        solidItem = new paper.CompoundPath({
-                            children: flatPaths,
-                            fillRule: 'evenodd' // Standard per grafica vettoriale complessa
-                        });
-                        // 3. Reorient fissa la direzione dei tracciati (buchi vs pieni)
-                        solidItem.reorient(true);
-                        
-                        sourceItem.remove(); // Rimuovi l'originale
-                    } else {
-                         setStatus("Nessun tracciato valido trovato nell'SVG", 'error');
-                         return;
-                    }
+                
+                if (currentMode === 'text') {
+                    // Modalità Testo (Veloce, non richiede async pesante)
+                    const textVal = document.getElementById('inputText').value.toUpperCase();
+                    if(!textVal) return;
+                    const fontSize = parseInt(document.getElementById('fontSize').value) || 100;
+                    const pathData = font.getPath(textVal, 0, 0, fontSize).toPathData(2);
+                    let temp = new paper.CompoundPath(pathData);
+                    solidItem = temp.unite();
+                    temp.remove();
+                    startHatching(solidItem, currentId);
                 } else {
-                    // Per il testo manteniamo unite() che funziona bene con i font
-                    solidItem = sourceItem.unite();
-                    sourceItem.remove();
+                    if(!importedSVGItem) return;
+                    
+                    // Modalità SVG - Analisi Asincrona "Deep Scan"
+                    // Questo risolve il blocco: analizziamo l'albero SVG a pezzi
+                    setStatus("Analisi vettoriale profonda...", 'warn');
+                    updateProgress(0, "Scansione geometria...");
+
+                    const flatPaths = await extractPathsAsync(importedSVGItem, currentId);
+                    
+                    if (currentId !== calculationQueueId) return; // Interrotto
+                    if (flatPaths.length === 0) throw new Error("SVG vuoto o non valido");
+
+                    updateProgress(10, `Trovati ${flatPaths.length} tracciati. Unione...`);
+                    await new Promise(r => setTimeout(r, 20)); // Yield
+
+                    // Creazione geometria
+                    solidItem = new paper.CompoundPath({
+                        children: flatPaths,
+                        fillRule: 'evenodd'
+                    });
+                    
+                    // Avvia hatch
+                    startHatching(solidItem, currentId);
                 }
 
-                solidItem.position = new paper.Point(0,0);
-                solidItem.fillColor = null;
+            } catch (e) {
+                console.error(e);
+                isCalculating = false;
+                setStatus("Errore: " + e.message, 'error');
+                updateProgress(-1);
+            }
+        }
 
-                // 3. Setup Outline Visivo
-                let visualOutline = solidItem.clone();
-                visualOutline.strokeColor = '#0000FF'; // Blu puro
-                visualOutline.strokeScaling = false; // Spessore costante indipendentemente dallo zoom
+        // --- NEW: Async Path Extractor (Anti-Freeze) ---
+        function extractPathsAsync(rootItem, runId) {
+            return new Promise((resolve, reject) => {
+                let paths = [];
+                let stack = [rootItem]; // Stack per DFS
+                const startTime = performance.now();
+                let processedCount = 0;
+
+                function processStack() {
+                    // Processa per max 10ms per frame
+                    const sliceStart = performance.now();
+                    while (stack.length > 0 && performance.now() - sliceStart < 10) {
+                        if (runId !== calculationQueueId) return; // Stop if outdated
+
+                        const item = stack.pop();
+                        
+                        if (!item.visible) continue;
+
+                        if (item.className === 'Path') {
+                            // Filtro robustezza: ignora micro-segmenti e punti
+                            if (item.length > 0.1 && item.segments.length > 1) {
+                                let c = item.clone();
+                                c.closed = true; 
+                                paths.push(c);
+                            }
+                        } else if (item.children) {
+                            // Aggiungi figli allo stack (inverso per mantenere ordine visuale approx)
+                            for (let i = item.children.length - 1; i >= 0; i--) {
+                                stack.push(item.children[i]);
+                            }
+                        }
+                        processedCount++;
+                    }
+
+                    if (stack.length > 0) {
+                        // Continua al prossimo frame
+                        if (runId === calculationQueueId) {
+                            updateProgress(0, `Analizzati ${processedCount} elementi...`);
+                            requestAnimationFrame(processStack);
+                        }
+                    } else {
+                        // Finito
+                        resolve(paths);
+                    }
+                }
                 
-                finalOutlineGroup = visualOutline;
+                processStack();
+            });
+        }
 
-                // 4. Ray Casting Hatching
-                const spacing = parseFloat(document.getElementById('hatchSpacing').value) || 0.5;
-                const angle = parseFloat(document.getElementById('hatchAngle').value) || 45;
-                
-                const bounds = solidItem.bounds;
-                const diag = Math.sqrt(bounds.width**2 + bounds.height**2);
-                const count = Math.ceil(diag / spacing) * 1.5;
-                const startX = bounds.center.x - (diag / 2);
+        // --- Hatching (Già asincrono, invariato ma connesso) ---
+        function startHatching(solidItem, runId) {
+            solidItem.position = new paper.Point(0,0);
+            solidItem.fillColor = null;
 
-                finalHatchGroup = new paper.Group();
+            finalOutlineGroup = solidItem.clone();
+            finalOutlineGroup.strokeColor = '#0000FF';
+            finalOutlineGroup.strokeScaling = false;
 
-                for(let i = 0; i < count; i++) {
-                    const x = startX + (i * spacing);
+            finalHatchGroup = new paper.Group();
+            
+            const spacing = parseFloat(document.getElementById('hatchSpacing').value) || 0.5;
+            const angle = parseFloat(document.getElementById('hatchAngle').value) || 45;
+            const bounds = solidItem.bounds;
+            const diag = Math.sqrt(bounds.width**2 + bounds.height**2);
+            
+            // Limitatore di sicurezza
+            let safeSpacing = spacing;
+            if (diag / spacing > 5000) {
+                // Se troppe righe, aumenta spaziatura temporaneamente o avvisa?
+                // Per ora procediamo, l'async lo gestirà, ma aggiorniamo UI
+            }
+
+            const count = Math.ceil(diag / safeSpacing) * 1.5;
+            const startX = bounds.center.x - (diag / 2);
+
+            let i = 0;
+
+            function processSlice() {
+                if (runId !== calculationQueueId) { solidItem.remove(); return; }
+
+                const sliceStart = performance.now();
+                // 12ms slice per hatching
+                while (performance.now() - sliceStart < 12 && i < count) {
+                    const x = startX + (i * safeSpacing);
                     const p1 = new paper.Point(x, bounds.center.y - (diag / 2));
                     const p2 = new paper.Point(x, bounds.center.y + (diag / 2));
-                    
                     const rawLine = new paper.Path.Line(p1, p2);
                     rawLine.rotate(angle - 90, bounds.center);
 
-                    const intersections = rawLine.getIntersections(solidItem);
-                    
-                    if(intersections.length > 0) {
-                        const sorted = intersections.sort((a, b) => 
-                            a.point.getDistance(rawLine.firstSegment.point) - b.point.getDistance(rawLine.firstSegment.point)
-                        );
-                        let points = [rawLine.firstSegment.point, ...sorted.map(i=>i.point), rawLine.lastSegment.point];
-                        for(let j=0; j < points.length - 1; j++) {
-                            const mid = points[j].add(points[j+1]).divide(2);
-                            if(solidItem.contains(mid)) {
-                                const seg = new paper.Path.Line(points[j], points[j+1]);
-                                seg.strokeColor = '#FF0000';
-                                seg.strokeWidth = 1;
-                                seg.strokeScaling = false; 
-                                finalHatchGroup.addChild(seg);
+                    if (rawLine.bounds.intersects(bounds)) {
+                        const intersections = rawLine.getIntersections(solidItem);
+                        if(intersections.length > 0) {
+                            const sorted = intersections.sort((a, b) => a.point.getDistance(rawLine.firstSegment.point) - b.point.getDistance(rawLine.firstSegment.point));
+                            let pts = [rawLine.firstSegment.point, ...sorted.map(x=>x.point), rawLine.lastSegment.point];
+                            for(let j=0; j < pts.length - 1; j++) {
+                                const mid = pts[j].add(pts[j+1]).divide(2);
+                                if(solidItem.contains(mid)) {
+                                    const seg = new paper.Path.Line(pts[j], pts[j+1]);
+                                    seg.strokeColor = '#FF0000';
+                                    seg.strokeWidth = 1;
+                                    seg.strokeScaling = false;
+                                    finalHatchGroup.addChild(seg);
+                                }
                             }
                         }
                     }
                     rawLine.remove();
+                    i++;
                 }
 
-                solidItem.remove();
-                
-                finalHatchGroup.sendToBack();
-                finalOutlineGroup.bringToFront();
+                const percent = (i / count) * 100;
+                updateProgress(percent, `Campitura: ${Math.round(percent)}% (${i}/${count})`);
 
-                // 5. Applica visibilità e stili iniziali
-                toggleVisibilityOnly();
-
-                // 6. FIT VIEW (AUTO ZOOM)
-                let totalBounds = finalOutlineGroup.bounds.clone();
-                if(finalHatchGroup.children.length > 0) {
-                    totalBounds = totalBounds.unite(finalHatchGroup.bounds);
+                if (i < count) {
+                    requestAnimationFrame(processSlice);
+                } else {
+                    finishJob(solidItem);
                 }
-                paper.view.center = totalBounds.center;
-                const scaleX = paper.view.viewSize.width / (totalBounds.width * 1.1);
-                const scaleY = paper.view.viewSize.height / (totalBounds.height * 1.1);
-                paper.view.zoom = Math.min(scaleX, scaleY);
-
-                paper.view.draw();
-                
-                setStatus("Elaborazione completata", 'success');
-                document.getElementById('calcStatus').innerText = "Pronto";
-                enableDownload(true);
-
-            } catch(e) {
-                console.error(e);
-                setStatus("Errore geometria: " + e.message, 'error');
             }
+            requestAnimationFrame(processSlice);
         }
 
-        // --- DXF Export ---
+        function finishJob(solidItem) {
+            solidItem.remove();
+            
+            finalHatchGroup.sendToBack();
+            finalOutlineGroup.bringToFront();
+
+            toggleVisibilityOnly();
+
+            let totalBounds = finalOutlineGroup.bounds.clone();
+            if(finalHatchGroup.children.length > 0) totalBounds = totalBounds.unite(finalHatchGroup.bounds);
+            const margin = Math.max(totalBounds.width, totalBounds.height) * 0.05;
+            totalBounds = totalBounds.expand(margin);
+
+            paper.view.center = totalBounds.center;
+            const scaleX = paper.view.viewSize.width / totalBounds.width;
+            const scaleY = paper.view.viewSize.height / totalBounds.height;
+            paper.view.zoom = Math.min(scaleX, scaleY);
+
+            paper.view.draw();
+            
+            setStatus("Elaborazione completata.", 'success');
+            updateProgress(-1);
+            enableDownload(true);
+            isCalculating = false;
+        }
+
         function downloadDXF() {
             if (!finalHatchGroup) return;
             let dxf = "0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n";
-
             function writeLine(x1, y1, x2, y2, layer) {
                 dxf += `0\nLINE\n8\n${layer}\n10\n${x1.toFixed(4)}\n20\n${(-y1).toFixed(4)}\n11\n${x2.toFixed(4)}\n21\n${(-y2).toFixed(4)}\n`;
             }
-
-            // Esporta Hatch sempre (anche se nascosto a video, se esiste)
             finalHatchGroup.children.forEach(c => {
-                if(c.segments && c.segments.length >= 2) 
-                    writeLine(c.firstSegment.point.x, c.firstSegment.point.y, c.lastSegment.point.x, c.lastSegment.point.y, "HATCH");
+                if(c.segments && c.segments.length >= 2) writeLine(c.firstSegment.point.x, c.firstSegment.point.y, c.lastSegment.point.x, c.lastSegment.point.y, "HATCH");
             });
-
-            // Esporta Outline (solo se checkato)
             if(document.getElementById('includeOutline').checked && finalOutlineGroup) {
                 const flat = finalOutlineGroup.clone();
                 flat.flatten(0.1); 
@@ -452,12 +535,11 @@
                 process(flat);
                 flat.remove();
             }
-
             dxf += "0\nENDSEC\n0\nEOF\n";
             const blob = new Blob([dxf], {type: 'application/dxf'});
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = "LaserJob_v1.1.dxf";
+            link.download = "LaserJob_v1.5.dxf";
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
