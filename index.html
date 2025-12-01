@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generatore DXF Laser v1.0</title>
+    <title>Generatore DXF Laser v1.1</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Paper.js -->
@@ -20,7 +20,7 @@
 
     <div class="max-w-6xl mx-auto bg-white rounded-lg shadow-lg p-6">
         <div class="flex justify-between items-center mb-4">
-            <h1 class="text-2xl font-bold text-gray-800">Generatore DXF Laser <span class="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-1 rounded-full ml-2">v1.0</span></h1>
+            <h1 class="text-2xl font-bold text-gray-800">Generatore DXF Laser <span class="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-1 rounded-full ml-2">v1.1</span></h1>
         </div>
         
         <div id="appStatus" class="mb-4 p-3 bg-blue-50 text-blue-700 rounded-md text-sm border border-blue-200">
@@ -297,36 +297,44 @@
             sourceItem.position = new paper.Point(0,0);
 
             try {
-                // 2. UNIONE BOOLEANA
-                function getAllPaths(item) {
-                    let paths = [];
-                    if (item.className === 'Path' || item.className === 'CompoundPath') {
-                        paths.push(item);
-                    } else if (item.children) {
-                        for (let child of item.children) {
-                            paths = paths.concat(getAllPaths(child));
-                        }
-                    }
-                    return paths;
-                }
-
                 let solidItem;
-                
+
                 if (currentMode === 'svg') {
-                    const allPaths = getAllPaths(sourceItem);
-                    if (allPaths.length > 0) {
-                        solidItem = allPaths[0]; 
-                        for(let k=1; k<allPaths.length; k++) {
-                            let temp = solidItem.unite(allPaths[k]);
-                            if(solidItem !== allPaths[0]) solidItem.remove(); 
-                            solidItem = temp;
+                    // FIX v1.1: Logica "Reorient" per SVG con buchi (ingranaggi)
+                    // Invece di unire i path, li mettiamo tutti in un unico CompoundPath e usiamo reorient()
+                    // Questo usa la regola Non-Zero/Even-Odd per determinare i buchi automaticamente.
+                    
+                    // 1. Appiattisci tutto in una lista di Path semplici
+                    function getAllFlatPaths(item) {
+                        let paths = [];
+                        if (item.className === 'Path') {
+                            paths.push(item.clone()); // Cloniamo per sicurezza
+                        } else if (item.children) {
+                            for (let child of item.children) {
+                                paths = paths.concat(getAllFlatPaths(child));
+                            }
                         }
-                        sourceItem.remove(); 
+                        return paths;
+                    }
+
+                    const flatPaths = getAllFlatPaths(sourceItem);
+                    
+                    if (flatPaths.length > 0) {
+                        // 2. Crea un CompoundPath unico con tutti i tracciati
+                        solidItem = new paper.CompoundPath({
+                            children: flatPaths,
+                            fillRule: 'evenodd' // Standard per grafica vettoriale complessa
+                        });
+                        // 3. Reorient fissa la direzione dei tracciati (buchi vs pieni)
+                        solidItem.reorient(true);
+                        
+                        sourceItem.remove(); // Rimuovi l'originale
                     } else {
                          setStatus("Nessun tracciato valido trovato nell'SVG", 'error');
                          return;
                     }
                 } else {
+                    // Per il testo manteniamo unite() che funziona bene con i font
                     solidItem = sourceItem.unite();
                     sourceItem.remove();
                 }
@@ -449,7 +457,7 @@
             const blob = new Blob([dxf], {type: 'application/dxf'});
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = "LaserJob_v1.0.dxf";
+            link.download = "LaserJob_v1.1.dxf";
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
