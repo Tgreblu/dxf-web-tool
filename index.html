@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generatore DXF Laser v1.5</title>
+    <title>Generatore DXF Laser v1.7</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Paper.js -->
@@ -12,8 +12,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/opentype.js/1.3.4/opentype.min.js"></script>
     <style>
         body { font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; }
-        /* Altezza fissa per il canvas */
-        canvas[resize] { width: 100%; height: 500px; border: 1px solid #ccc; background-color: #fff; }
+        /* Canvas quadrato per visualizzare l'area di lavoro */
+        canvas[resize] { width: 500px; height: 500px; border: 1px solid #ccc; background-color: #fff; display: block; margin: 0 auto; }
         /* Stile barra di progresso */
         #progressContainer { display: none; width: 100%; background-color: #e5e7eb; border-radius: 9999px; height: 14px; margin-top: 10px; overflow: hidden; position: relative; }
         #progressBar { height: 100%; background-color: #3b82f6; width: 0%; transition: width 0.1s linear; }
@@ -24,78 +24,71 @@
 
     <div class="max-w-6xl mx-auto bg-white rounded-lg shadow-lg p-6">
         <div class="flex justify-between items-center mb-4">
-            <h1 class="text-2xl font-bold text-gray-800">Generatore DXF Laser <span class="text-sm font-normal text-gray-500 bg-gray-200 px-2 py-1 rounded-full ml-2">v1.5 (Async-Core)</span></h1>
+            <h1 class="text-2xl font-bold text-gray-800">Generatore DXF Laser <span class="text-sm font-normal text-white bg-blue-600 px-2 py-1 rounded-full ml-2">v1.7 (Fix)</span></h1>
         </div>
         
         <div id="appStatus" class="mb-4 p-3 bg-blue-50 text-blue-700 rounded-md text-sm border border-blue-200">
-            Inizializzazione sistema...
+            Sistema pronto. Coordinate DXF corrette (Y-UP).
         </div>
 
-        <!-- Tab Selezione Modalità -->
-        <div class="flex border-b border-gray-200 mb-6">
-            <button onclick="switchMode('text')" id="tabText" class="px-6 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600 focus:outline-none">
-                Modalità Testo
-            </button>
-            <button onclick="switchMode('svg')" id="tabSvg" class="px-6 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none">
-                Modalità Disegno (SVG)
-            </button>
-        </div>
-
-        <div class="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
             
-            <!-- Colonna Controlli -->
-            <div class="space-y-6 lg:col-span-1">
+            <!-- Colonna Controlli (Sinistra) -->
+            <div class="lg:col-span-4 space-y-6">
                 
-                <!-- Input Testo -->
-                <div id="textControls">
-                    <label class="block text-sm font-medium text-gray-700">Testo da marcare</label>
-                    <input type="text" id="inputText" value="CASA" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2 focus:border-blue-500" oninput="scheduleUpdate()">
+                <!-- Contenuto -->
+                <div class="p-4 bg-white border border-gray-200 rounded-lg shadow-sm">
+                    <label class="block text-sm font-bold text-gray-700 mb-2">1. Contenuto</label>
                     
-                    <label class="block text-sm font-medium text-gray-700 mt-4">Dimensione Testo (px)</label>
-                    <input type="number" id="fontSize" value="150" class="mt-1 block w-full rounded-md border-gray-300 shadow-sm border p-2" onchange="scheduleUpdate()">
+                    <div class="flex border-b border-gray-200 mb-4">
+                        <button onclick="switchMode('text')" id="tabText" class="w-1/2 py-2 text-xs font-bold text-blue-600 border-b-2 border-blue-600 focus:outline-none">TESTO</button>
+                        <button onclick="switchMode('svg')" id="tabSvg" class="w-1/2 py-2 text-xs font-medium text-gray-500 hover:text-gray-700 focus:outline-none">SVG</button>
+                    </div>
+
+                    <div id="textControls">
+                        <label class="block text-xs text-gray-500">Testo da marcare</label>
+                        <input type="text" id="inputText" value="CASA" class="mt-1 block w-full border rounded p-2" oninput="scheduleUpdate()">
+                    </div>
+
+                    <div id="svgControls" class="hidden">
+                        <div class="flex justify-center px-4 py-4 border-2 border-gray-300 border-dashed rounded-md hover:bg-gray-50 cursor-pointer" onclick="document.getElementById('fileInput').click()">
+                            <div class="text-center">
+                                <span class="text-sm text-gray-600">Clicca per caricare SVG</span>
+                            </div>
+                        </div>
+                        <input type="file" id="fileInput" accept=".svg" class="hidden" onchange="handleFileUpload(this)">
+                        <p id="fileNameDisplay" class="text-xs text-gray-600 mt-1 italic"></p>
+                    </div>
                 </div>
 
-                <!-- Input File SVG -->
-                <div id="svgControls" class="hidden">
-                    <label class="block text-sm font-medium text-gray-700">Carica File SVG (da Illustrator)</label>
-                    <div class="mt-1 flex justify-center px-6 pt-5 pb-6 border-2 border-gray-300 border-dashed rounded-md hover:bg-gray-50 transition-colors cursor-pointer" onclick="document.getElementById('fileInput').click()">
-                        <div class="space-y-1 text-center">
-                            <svg class="mx-auto h-12 w-12 text-gray-400" stroke="currentColor" fill="none" viewBox="0 0 48 48">
-                                <path d="M28 8H12a4 4 0 00-4 4v20m32-12v8m0 0v8a4 4 0 01-4 4H12a4 4 0 01-4-4v-4m32-4l-3.172-3.172a4 4 0 00-5.656 0L28 28M8 32l9.172-9.172a4 4 0 015.656 0L28 28m0 0l4 4m4-24h8m-4-4v8m-12 4h.02" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
-                            </svg>
-                            <div class="text-sm text-gray-600">
-                                <span class="font-medium text-blue-600 hover:text-blue-500">Carica un file</span>
-                            </div>
-                            <p class="text-xs text-gray-500">SVG fino a 2MB</p>
+                <!-- Geometria -->
+                <div class="p-4 bg-blue-50 border border-blue-200 rounded-lg shadow-sm">
+                    <label class="block text-sm font-bold text-blue-800 mb-3">2. Geometria (mm)</label>
+                    
+                    <div class="mb-4">
+                        <label class="block text-xs font-bold text-gray-600">Dimensione Simbolo</label>
+                        <div class="flex items-center">
+                            <input type="number" id="targetSizeMM" value="15" class="mt-1 block w-full border border-blue-300 rounded p-2 font-bold text-blue-900" onchange="scheduleUpdate()">
+                            <span class="ml-2 text-xs text-gray-500">mm</span>
                         </div>
                     </div>
-                    <input type="file" id="fileInput" accept=".svg" class="hidden" onchange="handleFileUpload(this)">
-                    <p id="fileNameDisplay" class="text-sm text-gray-600 mt-2 italic font-semibold text-blue-600"></p>
-                    <p id="fileSizeInfo" class="text-xs text-gray-500 mt-1"></p>
+
+                    <div class="grid grid-cols-2 gap-4">
+                        <div>
+                            <label class="block text-xs font-bold text-gray-600">Posizione X</label>
+                            <input type="number" id="posX" value="20" class="mt-1 block w-full border border-blue-300 rounded p-2" onchange="scheduleUpdate()">
+                        </div>
+                        <div>
+                            <label class="block text-xs font-bold text-gray-600">Posizione Y</label>
+                            <input type="number" id="posY" value="20" class="mt-1 block w-full border border-blue-300 rounded p-2" onchange="scheduleUpdate()">
+                        </div>
+                    </div>
+                    <p class="text-[10px] text-blue-600 mt-2 italic">Coordinate centro simbolo.</p>
                 </div>
 
-                <!-- Parametri Comuni -->
-                <div class="p-4 bg-gray-50 rounded-lg border border-gray-200">
-                    <h3 class="text-sm font-bold text-gray-700 mb-3">Impostazioni Visualizzazione</h3>
-                    
-                    <div class="flex items-center mb-3">
-                        <input type="checkbox" id="showHatch" checked onchange="toggleVisibilityOnly()" class="h-4 w-4 text-red-600 rounded focus:ring-red-500">
-                        <label for="showHatch" class="ml-2 block text-sm text-gray-700">Mostra Campitura (Anteprima)</label>
-                    </div>
-
-                    <div class="flex items-center mb-2">
-                        <input type="checkbox" id="includeOutline" checked onchange="toggleVisibilityOnly()" class="h-4 w-4 text-blue-600 rounded focus:ring-blue-500">
-                        <label for="includeOutline" class="ml-2 block text-sm text-gray-700">Includi Perimetro (Blu)</label>
-                    </div>
-                    
-                    <div class="flex items-center ml-6 mb-4">
-                        <input type="checkbox" id="extraThick" onchange="toggleVisibilityOnly()" class="h-4 w-4 text-blue-400 rounded focus:ring-blue-400">
-                        <label for="extraThick" class="ml-2 block text-xs text-gray-500 font-medium">Outline Extra Spesso</label>
-                    </div>
-
-                    <hr class="border-gray-200 my-3">
-
-                    <h3 class="text-sm font-bold text-gray-700 mb-3">Parametri Tecnici (Hatch)</h3>
+                <!-- Parametri Hatch -->
+                <div class="p-4 bg-gray-50 rounded-lg border border-gray-200 shadow-sm">
+                    <h3 class="text-sm font-bold text-gray-700 mb-3">Parametri Tecnici</h3>
                     <div class="grid grid-cols-2 gap-4">
                         <div>
                             <label class="block text-xs font-medium text-gray-500">Passo (mm)</label>
@@ -106,13 +99,16 @@
                             <input type="number" id="hatchAngle" value="45" class="mt-1 w-full p-2 border rounded" onchange="scheduleUpdate()">
                         </div>
                     </div>
+                    <div class="mt-3">
+                        <input type="checkbox" id="includeOutline" checked onchange="toggleVisibilityOnly()" class="align-middle text-blue-600">
+                        <label for="includeOutline" class="text-xs ml-1 align-middle text-gray-700">Includi Perimetro (Blu)</label>
+                    </div>
                 </div>
 
                 <div class="pt-2">
-                    <button id="btnDownload" onclick="downloadDXF()" disabled class="w-full flex justify-center py-3 px-4 border border-transparent rounded-md shadow-sm text-sm font-bold text-white bg-gray-400 cursor-not-allowed transition-colors">
-                        Scarica DXF
+                    <button id="btnDownload" onclick="downloadDXF()" disabled class="w-full py-4 px-4 rounded shadow-lg font-bold text-white bg-gray-400 cursor-not-allowed transition-colors text-lg">
+                        SCARICA DXF
                     </button>
-                    <!-- Progress Bar -->
                     <div id="progressContainer">
                         <div id="progressBar"></div>
                         <div id="progressTextOverlay"></div>
@@ -122,16 +118,20 @@
             </div>
 
             <!-- Preview Canvas -->
-            <div class="lg:col-span-2 bg-gray-50 rounded-lg border border-gray-200 p-1 flex flex-col">
-                <div class="flex justify-between items-center px-2 py-1 bg-white border-b mb-1">
-                    <span class="text-xs font-semibold text-gray-500">ANTEPRIMA (Auto-Zoom)</span>
-                    <div class="text-xs space-x-2">
-                        <span class="inline-block w-3 h-3 bg-red-500 rounded-full"></span> <span class="text-gray-600">Hatch</span>
-                        <span class="inline-block w-3 h-3 bg-blue-600 rounded-full"></span> <span class="text-gray-600">Outline</span>
+            <div class="lg:col-span-8 bg-gray-100 rounded-lg border border-gray-300 p-4 flex flex-col items-center justify-center">
+                <div class="w-full flex justify-between items-center mb-2 px-4">
+                    <span class="text-xs font-bold text-gray-500">ANTEPRIMA (Area 120x120mm)</span>
+                    <div class="text-xs space-x-3">
+                        <span class="inline-flex items-center"><span class="w-3 h-3 bg-red-500 rounded-full mr-1"></span> Hatch</span>
+                        <span class="inline-flex items-center"><span class="w-3 h-3 bg-blue-600 rounded-full mr-1"></span> Outline</span>
                     </div>
                 </div>
-                <div class="flex-grow relative w-full h-full">
+                <!-- Container Canvas -->
+                <div class="relative shadow-xl bg-white" style="width: 500px; height: 500px;">
                     <canvas id="previewCanvas" resize></canvas>
+                    <div class="absolute bottom-2 left-2 text-[10px] text-gray-400 font-mono">0,0</div>
+                    <div class="absolute top-2 left-2 text-[10px] text-gray-400 font-mono">0,120</div>
+                    <div class="absolute bottom-2 right-2 text-[10px] text-gray-400 font-mono">120,0</div>
                 </div>
             </div>
         </div>
@@ -139,17 +139,13 @@
 
     <!-- Script -->
     <script type="text/javascript">
-        // --- Variabili Globali ---
-        let font = null;
-        let paperProject = null;
-        let finalHatchGroup = null;
-        let finalOutlineGroup = null;
-        let updateTimer = null;
-        let isReady = false;
-        let currentMode = 'text'; 
-        let importedSVGItem = null;
-        let isCalculating = false; 
-        let calculationQueueId = 0; 
+        let font = null, paperProject = null, finalHatchGroup = null, finalOutlineGroup = null;
+        let updateTimer = null, isReady = false, currentMode = 'text', importedSVGItem = null;
+        let isCalculating = false, calculationQueueId = 0; 
+
+        // Configurazione Area Lavoro (mm) - Usata solo per visualizzazione e riferimento Y-Flip
+        const WORK_W = 120;
+        const WORK_H = 120;
 
         const FONT_URLS = [
             'https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/fonts/Roboto/Roboto-Regular.ttf',
@@ -162,82 +158,47 @@
             document.getElementById('textControls').classList.toggle('hidden', mode !== 'text');
             document.getElementById('svgControls').classList.toggle('hidden', mode !== 'svg');
             
-            const tabText = document.getElementById('tabText');
-            const tabSvg = document.getElementById('tabSvg');
-            
-            if (mode === 'text') {
-                tabText.className = "px-6 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600 focus:outline-none";
-                tabSvg.className = "px-6 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none";
-            } else {
-                tabSvg.className = "px-6 py-2 text-sm font-medium text-blue-600 border-b-2 border-blue-600 focus:outline-none";
-                tabText.className = "px-6 py-2 text-sm font-medium text-gray-500 hover:text-gray-700 focus:outline-none";
-            }
+            const t1 = document.getElementById('tabText'), t2 = document.getElementById('tabSvg');
+            const active = "text-blue-600 border-blue-600 font-bold", inactive = "text-gray-500 font-medium";
+            if (mode === 'text') { t1.className=`w-1/2 py-2 text-xs border-b-2 ${active}`; t2.className=`w-1/2 py-2 text-xs border-b-2 border-transparent ${inactive}`; }
+            else { t2.className=`w-1/2 py-2 text-xs border-b-2 ${active}`; t1.className=`w-1/2 py-2 text-xs border-b-2 border-transparent ${inactive}`; }
             scheduleUpdate();
         }
 
         function setStatus(msg, type = 'info') {
             const el = document.getElementById('appStatus');
             el.innerText = msg;
-            const colors = {
-                'error': 'bg-red-50 text-red-700 border-red-200',
-                'success': 'bg-green-50 text-green-700 border-green-200',
-                'info': 'bg-blue-50 text-blue-700 border-blue-200',
-                'warn': 'bg-yellow-50 text-yellow-700 border-yellow-200'
-            };
-            el.className = `mb-4 p-3 rounded-md text-sm border ${colors[type] || colors['info']}`;
+            const colors = { 'error': 'bg-red-50 text-red-700', 'success': 'bg-green-50 text-green-700', 'info': 'bg-blue-50 text-blue-700', 'warn': 'bg-yellow-50 text-yellow-700' };
+            el.className = `mb-4 p-3 rounded-md text-sm border border-blue-200 ${colors[type] || colors['info']}`;
         }
 
         function enableDownload(enable) {
             const btn = document.getElementById('btnDownload');
-            if(enable) {
-                btn.disabled = false;
-                btn.classList.remove('bg-gray-400', 'cursor-not-allowed');
-                btn.classList.add('bg-blue-600', 'hover:bg-blue-700');
-            } else {
-                btn.disabled = true;
-                btn.classList.add('bg-gray-400', 'cursor-not-allowed');
-                btn.classList.remove('bg-blue-600', 'hover:bg-blue-700');
-            }
+            if(enable) { btn.disabled = false; btn.classList.remove('bg-gray-400', 'cursor-not-allowed'); btn.classList.add('bg-blue-600', 'hover:bg-blue-700'); }
+            else { btn.disabled = true; btn.classList.add('bg-gray-400', 'cursor-not-allowed'); btn.classList.remove('bg-blue-600', 'hover:bg-blue-700'); }
         }
 
         function updateProgress(percent, text) {
             const container = document.getElementById('progressContainer');
             const bar = document.getElementById('progressBar');
             const overlay = document.getElementById('progressTextOverlay');
-            
-            if (percent < 0) {
-                container.style.display = 'none';
-                overlay.innerText = "";
-            } else {
-                container.style.display = 'block';
-                const p = Math.min(100, Math.max(0, percent));
-                bar.style.width = p + '%';
-                if(text) overlay.innerText = text;
-            }
+            if (percent < 0) { container.style.display = 'none'; overlay.innerText = ""; } 
+            else { container.style.display = 'block'; bar.style.width = percent + '%'; if(text) overlay.innerText = text; }
         }
 
         function handleFileUpload(input) {
             const file = input.files[0];
             if (file) {
-                document.getElementById('fileNameDisplay').innerText = "File: " + file.name;
+                document.getElementById('fileNameDisplay').innerText = file.name;
                 setStatus("Caricamento SVG...", 'info');
-                
                 const reader = new FileReader();
                 reader.onload = function(e) {
                     paperProject.importSVG(e.target.result, {
-                        expandShapes: true,
-                        insert: false,
+                        expandShapes: true, insert: false,
                         onLoad: function(item) {
                             importedSVGItem = item;
-                            const b = item.bounds;
-                            const w = Math.round(b.width);
-                            const h = Math.round(b.height);
-                            document.getElementById('fileSizeInfo').innerText = `Dimensioni rilevate: ${w} x ${h} px`;
-                            setStatus("File in memoria. Inizio elaborazione...", 'info');
+                            setStatus("File caricato. Calcolo...", 'info');
                             scheduleUpdate();
-                        },
-                        onError: function(e) {
-                            setStatus("Errore importazione SVG: " + e, 'error');
                         }
                     });
                 };
@@ -247,21 +208,8 @@
 
         function toggleVisibilityOnly() {
             if(!finalHatchGroup || !finalOutlineGroup) return;
-
-            const showHatch = document.getElementById('showHatch').checked;
-            const showOutline = document.getElementById('includeOutline').checked;
-            const extraThick = document.getElementById('extraThick').checked;
-
-            finalHatchGroup.visible = showHatch;
-            finalOutlineGroup.visible = showOutline;
-            
-            if (extraThick) {
-                finalOutlineGroup.strokeWidth = 6;
-            } else {
-                finalOutlineGroup.strokeWidth = 1.5;
-            }
-            finalOutlineGroup.strokeScaling = false;
-
+            finalHatchGroup.visible = true;
+            finalOutlineGroup.visible = document.getElementById('includeOutline').checked;
             paper.view.draw();
         }
 
@@ -273,7 +221,6 @@
                 const canvas = document.getElementById('previewCanvas');
                 paper.setup(canvas);
                 paperProject = paper.project;
-
                 let buffer = null;
                 for (const url of FONT_URLS) {
                     try {
@@ -284,14 +231,10 @@
                 if (buffer) {
                     font = opentype.parse(buffer);
                     isReady = true;
-                    setStatus('Pronto. Inserisci testo o carica SVG.', 'success');
+                    setStatus('Sistema Pronto.', 'success');
                     scheduleUpdate();
-                } else {
-                    throw new Error("Font non caricato.");
                 }
-            } catch(e) {
-                setStatus("Errore Init: " + e.message, 'error');
-            }
+            } catch(e) { setStatus("Errore Init: " + e.message, 'error'); }
         }
 
         window.scheduleUpdate = function() {
@@ -302,166 +245,142 @@
             updateTimer = setTimeout(prepareAndCalculate, 500);
         }
 
-        // --- CORE ASYNC PIPELINE ---
-        
+        // --- ASYNC ENGINE ---
         async function prepareAndCalculate() {
             const currentId = calculationQueueId;
             if (!paperProject) return;
-            
             isCalculating = true;
             paperProject.activeLayer.removeChildren();
-            paper.view.zoom = 1;
-            paper.view.center = new paper.Point(0,0);
-
+            
+            // Coordinate System: PaperJS (0,0 = Top-Left)
+            // Visualizzazione: Mappiamo 120x120mm su 500x500px
+            // In PaperJS Y cresce verso il basso. Nel DXF Y cresce verso l'alto.
+            
+            const scaleFactor = 500 / 120; // px per mm
+            
+            // Disegna bordi foglio
+            const sheet = new paper.Path.Rectangle(new paper.Point(0,0), new paper.Size(120, 120));
+            sheet.strokeColor = '#e5e7eb';
+            sheet.strokeWidth = 0.5;
+            
             try {
                 let solidItem;
-                
                 if (currentMode === 'text') {
-                    // Modalità Testo (Veloce, non richiede async pesante)
-                    const textVal = document.getElementById('inputText').value.toUpperCase();
+                    const el = document.getElementById('inputText');
+                    if (!el) return;
+                    const textVal = el.value.toUpperCase();
                     if(!textVal) return;
-                    const fontSize = parseInt(document.getElementById('fontSize').value) || 100;
-                    const pathData = font.getPath(textVal, 0, 0, fontSize).toPathData(2);
+                    // Path ad alta risoluzione (fisso per calcolo)
+                    const pathData = font.getPath(textVal, 0, 0, 100).toPathData(2);
                     let temp = new paper.CompoundPath(pathData);
                     solidItem = temp.unite();
                     temp.remove();
                     startHatching(solidItem, currentId);
                 } else {
                     if(!importedSVGItem) return;
-                    
-                    // Modalità SVG - Analisi Asincrona "Deep Scan"
-                    // Questo risolve il blocco: analizziamo l'albero SVG a pezzi
-                    setStatus("Analisi vettoriale profonda...", 'warn');
-                    updateProgress(0, "Scansione geometria...");
-
+                    updateProgress(10, "Analisi SVG...");
                     const flatPaths = await extractPathsAsync(importedSVGItem, currentId);
-                    
-                    if (currentId !== calculationQueueId) return; // Interrotto
-                    if (flatPaths.length === 0) throw new Error("SVG vuoto o non valido");
-
-                    updateProgress(10, `Trovati ${flatPaths.length} tracciati. Unione...`);
-                    await new Promise(r => setTimeout(r, 20)); // Yield
-
-                    // Creazione geometria
-                    solidItem = new paper.CompoundPath({
-                        children: flatPaths,
-                        fillRule: 'evenodd'
-                    });
-                    
-                    // Avvia hatch
+                    if (currentId !== calculationQueueId) return;
+                    if (flatPaths.length === 0) throw new Error("SVG vuoto.");
+                    updateProgress(20, "Fusione geometria...");
+                    await new Promise(r => setTimeout(r, 20));
+                    solidItem = new paper.CompoundPath({ children: flatPaths, fillRule: 'evenodd' });
                     startHatching(solidItem, currentId);
                 }
-
-            } catch (e) {
-                console.error(e);
-                isCalculating = false;
-                setStatus("Errore: " + e.message, 'error');
-                updateProgress(-1);
-            }
+            } catch (e) { console.error(e); isCalculating = false; setStatus("Errore: " + e.message, 'error'); updateProgress(-1); }
         }
 
-        // --- NEW: Async Path Extractor (Anti-Freeze) ---
         function extractPathsAsync(rootItem, runId) {
-            return new Promise((resolve, reject) => {
+            return new Promise((resolve) => {
                 let paths = [];
-                let stack = [rootItem]; // Stack per DFS
-                const startTime = performance.now();
-                let processedCount = 0;
-
-                function processStack() {
-                    // Processa per max 10ms per frame
-                    const sliceStart = performance.now();
-                    while (stack.length > 0 && performance.now() - sliceStart < 10) {
-                        if (runId !== calculationQueueId) return; // Stop if outdated
-
+                let stack = [rootItem];
+                function process() {
+                    const start = performance.now();
+                    while(stack.length > 0 && performance.now() - start < 12) {
+                        if (runId !== calculationQueueId) return;
                         const item = stack.pop();
-                        
                         if (!item.visible) continue;
-
                         if (item.className === 'Path') {
-                            // Filtro robustezza: ignora micro-segmenti e punti
-                            if (item.length > 0.1 && item.segments.length > 1) {
-                                let c = item.clone();
-                                c.closed = true; 
-                                paths.push(c);
-                            }
+                            if (item.length > 0.1) { let c = item.clone(); c.closed = true; c.applyMatrix = true; paths.push(c); }
                         } else if (item.children) {
-                            // Aggiungi figli allo stack (inverso per mantenere ordine visuale approx)
-                            for (let i = item.children.length - 1; i >= 0; i--) {
-                                stack.push(item.children[i]);
-                            }
+                            for (let i = item.children.length - 1; i >= 0; i--) stack.push(item.children[i]);
                         }
-                        processedCount++;
                     }
-
-                    if (stack.length > 0) {
-                        // Continua al prossimo frame
-                        if (runId === calculationQueueId) {
-                            updateProgress(0, `Analizzati ${processedCount} elementi...`);
-                            requestAnimationFrame(processStack);
-                        }
-                    } else {
-                        // Finito
-                        resolve(paths);
-                    }
+                    if(stack.length > 0) requestAnimationFrame(process); else resolve(paths);
                 }
-                
-                processStack();
+                process();
             });
         }
 
-        // --- Hatching (Già asincrono, invariato ma connesso) ---
         function startHatching(solidItem, runId) {
-            solidItem.position = new paper.Point(0,0);
-            solidItem.fillColor = null;
+            // INPUT UTENTE
+            // Fix: Usiamo l'ID corretto targetSizeMM
+            const targetDimEl = document.getElementById('targetSizeMM');
+            const targetDim = targetDimEl ? parseFloat(targetDimEl.value) : 15;
+            
+            const posXEl = document.getElementById('posX');
+            const userX = posXEl ? parseFloat(posXEl.value) : 0;
+            
+            const posYEl = document.getElementById('posY');
+            const userY = posYEl ? parseFloat(posYEl.value) : 0;
 
+            // 1. SCALING
+            // Centra su 0,0 locale per scalare
+            solidItem.position = new paper.Point(0,0);
+            if (targetDim > 0) {
+                const b = solidItem.bounds;
+                const maxDim = Math.max(b.width, b.height);
+                if(maxDim > 0) solidItem.scale(targetDim / maxDim);
+            }
+
+            // 2. POSIZIONAMENTO VISUALE (PaperJS)
+            // Attenzione: In PaperJS (Canvas), Y=0 è in alto. 
+            // L'utente si aspetta Y=0 in basso (CAD).
+            // Quindi Y_Visual = 120 - UserY.
+            // X_Visual = UserX.
+            
+            const visualX = userX;
+            const visualY = 120 - userY; 
+            
+            solidItem.position = new paper.Point(visualX, visualY);
+
+            solidItem.fillColor = null;
             finalOutlineGroup = solidItem.clone();
             finalOutlineGroup.strokeColor = '#0000FF';
-            finalOutlineGroup.strokeScaling = false;
+            finalOutlineGroup.strokeScaling = false; 
 
             finalHatchGroup = new paper.Group();
             
             const spacing = parseFloat(document.getElementById('hatchSpacing').value) || 0.5;
             const angle = parseFloat(document.getElementById('hatchAngle').value) || 45;
             const bounds = solidItem.bounds;
-            const diag = Math.sqrt(bounds.width**2 + bounds.height**2);
+            const count = Math.ceil(Math.sqrt(bounds.width**2 + bounds.height**2) / spacing) * 1.5;
             
-            // Limitatore di sicurezza
-            let safeSpacing = spacing;
-            if (diag / spacing > 5000) {
-                // Se troppe righe, aumenta spaziatura temporaneamente o avvisa?
-                // Per ora procediamo, l'async lo gestirà, ma aggiorniamo UI
-            }
-
-            const count = Math.ceil(diag / safeSpacing) * 1.5;
-            const startX = bounds.center.x - (diag / 2);
-
+            // Per il calcolo hatch, usiamo il centro del solido
+            const startX = bounds.center.x - (Math.sqrt(bounds.width**2 + bounds.height**2) / 2);
             let i = 0;
 
             function processSlice() {
                 if (runId !== calculationQueueId) { solidItem.remove(); return; }
-
-                const sliceStart = performance.now();
-                // 12ms slice per hatching
-                while (performance.now() - sliceStart < 12 && i < count) {
-                    const x = startX + (i * safeSpacing);
-                    const p1 = new paper.Point(x, bounds.center.y - (diag / 2));
-                    const p2 = new paper.Point(x, bounds.center.y + (diag / 2));
+                const start = performance.now();
+                while (performance.now() - start < 12 && i < count) {
+                    const x = startX + (i * spacing);
+                    const p1 = new paper.Point(x, bounds.center.y - 1000);
+                    const p2 = new paper.Point(x, bounds.center.y + 1000);
                     const rawLine = new paper.Path.Line(p1, p2);
                     rawLine.rotate(angle - 90, bounds.center);
-
                     if (rawLine.bounds.intersects(bounds)) {
-                        const intersections = rawLine.getIntersections(solidItem);
-                        if(intersections.length > 0) {
-                            const sorted = intersections.sort((a, b) => a.point.getDistance(rawLine.firstSegment.point) - b.point.getDistance(rawLine.firstSegment.point));
+                        const ints = rawLine.getIntersections(solidItem);
+                        if(ints.length > 0) {
+                            const sorted = ints.sort((a,b) => a.point.getDistance(rawLine.firstSegment.point) - b.point.getDistance(rawLine.firstSegment.point));
                             let pts = [rawLine.firstSegment.point, ...sorted.map(x=>x.point), rawLine.lastSegment.point];
-                            for(let j=0; j < pts.length - 1; j++) {
+                            for(let j=0; j<pts.length-1; j++) {
                                 const mid = pts[j].add(pts[j+1]).divide(2);
                                 if(solidItem.contains(mid)) {
                                     const seg = new paper.Path.Line(pts[j], pts[j+1]);
                                     seg.strokeColor = '#FF0000';
-                                    seg.strokeWidth = 1;
-                                    seg.strokeScaling = false;
+                                    seg.strokeWidth = 0.5; 
+                                    seg.strokeScaling = false; 
                                     finalHatchGroup.addChild(seg);
                                 }
                             }
@@ -470,54 +389,50 @@
                     rawLine.remove();
                     i++;
                 }
-
-                const percent = (i / count) * 100;
-                updateProgress(percent, `Campitura: ${Math.round(percent)}% (${i}/${count})`);
-
-                if (i < count) {
-                    requestAnimationFrame(processSlice);
-                } else {
-                    finishJob(solidItem);
-                }
+                updateProgress((i/count)*100, `Calcolo...`);
+                if (i < count) requestAnimationFrame(processSlice); else finishJob(solidItem);
             }
             requestAnimationFrame(processSlice);
         }
 
         function finishJob(solidItem) {
             solidItem.remove();
-            
             finalHatchGroup.sendToBack();
             finalOutlineGroup.bringToFront();
-
             toggleVisibilityOnly();
-
-            let totalBounds = finalOutlineGroup.bounds.clone();
-            if(finalHatchGroup.children.length > 0) totalBounds = totalBounds.unite(finalHatchGroup.bounds);
-            const margin = Math.max(totalBounds.width, totalBounds.height) * 0.05;
-            totalBounds = totalBounds.expand(margin);
-
-            paper.view.center = totalBounds.center;
-            const scaleX = paper.view.viewSize.width / totalBounds.width;
-            const scaleY = paper.view.viewSize.height / totalBounds.height;
-            paper.view.zoom = Math.min(scaleX, scaleY);
-
-            paper.view.draw();
             
-            setStatus("Elaborazione completata.", 'success');
+            // Imposta view su tutto il foglio 120x120
+            paper.view.center = new paper.Point(60, 60);
+            paper.view.zoom = 500 / 120 * 0.95; // Fit canvas
+            
             updateProgress(-1);
-            enableDownload(true);
             isCalculating = false;
+            enableDownload(true);
+            setStatus("Pronto. Verifica e Scarica.", 'success');
         }
 
         function downloadDXF() {
             if (!finalHatchGroup) return;
             let dxf = "0\nSECTION\n2\nHEADER\n0\nENDSEC\n0\nSECTION\n2\nENTITIES\n";
             function writeLine(x1, y1, x2, y2, layer) {
-                dxf += `0\nLINE\n8\n${layer}\n10\n${x1.toFixed(4)}\n20\n${(-y1).toFixed(4)}\n11\n${x2.toFixed(4)}\n21\n${(-y2).toFixed(4)}\n`;
+                dxf += `0\nLINE\n8\n${layer}\n10\n${x1.toFixed(4)}\n20\n${y1.toFixed(4)}\n11\n${x2.toFixed(4)}\n21\n${y2.toFixed(4)}\n`;
             }
+
+            // IMPORTANTE: Trasformazione Coordinate per DXF
+            // In PaperJS abbiamo usato Y=0 in alto (visuale web).
+            // In DXF, Y=0 è in basso.
+            // Coordinate Paper (VisualY) = 120 - UserY.
+            // Per tornare a coordinate DXF (UserY), dobbiamo fare: 
+            // DxfY = 120 - VisualY.
+            
             finalHatchGroup.children.forEach(c => {
-                if(c.segments && c.segments.length >= 2) writeLine(c.firstSegment.point.x, c.firstSegment.point.y, c.lastSegment.point.x, c.lastSegment.point.y, "HATCH");
+                if(c.segments && c.segments.length >= 2) {
+                    const p1 = c.firstSegment.point;
+                    const p2 = c.lastSegment.point;
+                    writeLine(p1.x, 120 - p1.y, p2.x, 120 - p2.y, "HATCH");
+                }
             });
+
             if(document.getElementById('includeOutline').checked && finalOutlineGroup) {
                 const flat = finalOutlineGroup.clone();
                 flat.flatten(0.1); 
@@ -528,18 +443,20 @@
                             const p1 = n.segments[i].point;
                             const next = (i+1)%n.segments.length;
                             if(!n.closed && next===0) continue;
-                            writeLine(p1.x, p1.y, n.segments[next].point.x, n.segments[next].point.y, "OUTLINE");
+                            const p2 = n.segments[next].point;
+                            writeLine(p1.x, 120 - p1.y, p2.x, 120 - p2.y, "OUTLINE");
                         }
                     }
                 };
                 process(flat);
                 flat.remove();
             }
+
             dxf += "0\nENDSEC\n0\nEOF\n";
             const blob = new Blob([dxf], {type: 'application/dxf'});
             const link = document.createElement('a');
             link.href = URL.createObjectURL(blob);
-            link.download = "LaserJob_v1.5.dxf";
+            link.download = "LaserJob_v1.7_CoordFixed.dxf";
             document.body.appendChild(link);
             link.click();
             document.body.removeChild(link);
