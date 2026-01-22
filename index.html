@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Generatore DXF Laser v1.7</title>
+    <title>Generatore DXF Laser v1.8</title>
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com"></script>
     <!-- Paper.js -->
@@ -24,11 +24,11 @@
 
     <div class="max-w-6xl mx-auto bg-white rounded-lg shadow-lg p-6">
         <div class="flex justify-between items-center mb-4">
-            <h1 class="text-2xl font-bold text-gray-800">Generatore DXF Laser <span class="text-sm font-normal text-white bg-blue-600 px-2 py-1 rounded-full ml-2">v1.7 (Fix)</span></h1>
+            <h1 class="text-2xl font-bold text-gray-800">Generatore DXF Laser <span class="text-sm font-normal text-white bg-blue-600 px-2 py-1 rounded-full ml-2">v1.8 (ViewBox Fix)</span></h1>
         </div>
         
         <div id="appStatus" class="mb-4 p-3 bg-blue-50 text-blue-700 rounded-md text-sm border border-blue-200">
-            Sistema pronto. Coordinate DXF corrette (Y-UP).
+            Sistema pronto. Coordinate DXF corrette (Y-UP). Scala SVG basata su ViewBox.
         </div>
 
         <div class="grid grid-cols-1 lg:grid-cols-12 gap-6">
@@ -141,7 +141,9 @@
     <script type="text/javascript">
         let font = null, paperProject = null, finalHatchGroup = null, finalOutlineGroup = null;
         let updateTimer = null, isReady = false, currentMode = 'text', importedSVGItem = null;
-        let isCalculating = false, calculationQueueId = 0; 
+        let isCalculating = false, calculationQueueId = 0;
+        // Variabile per salvare il viewBox originale
+        let importedViewBox = null;
 
         // Configurazione Area Lavoro (mm) - Usata solo per visualizzazione e riferimento Y-Flip
         const WORK_W = 120;
@@ -193,7 +195,27 @@
                 setStatus("Caricamento SVG...", 'info');
                 const reader = new FileReader();
                 reader.onload = function(e) {
-                    paperProject.importSVG(e.target.result, {
+                    let svgContent = e.target.result;
+                    
+                    // --- MODIFICA 1: Estrazione del ViewBox dal testo SVG ---
+                    const vbMatch = svgContent.match(/viewBox=["']\s*([-\d\.]+)[,\s]+([-\d\.]+)[,\s]+([-\d\.]+)[,\s]+([-\d\.]+)\s*["']/);
+                    if (vbMatch) {
+                        importedViewBox = { width: parseFloat(vbMatch[3]), height: parseFloat(vbMatch[4]) };
+                        console.log("ViewBox trovato:", importedViewBox);
+                    } else {
+                        importedViewBox = null;
+                        console.log("Nessun ViewBox trovato.");
+                    }
+
+                    // --- MODIFICA 2 (CRUCIALE): Rimuove larghezza e altezza fisse ---
+                    // Questo impedisce a Paper.js di scalare il disegno se il file ha width="20cm" ecc.
+                    // Forziamo l'uso delle unità del ViewBox come unità native (1:1).
+                    svgContent = svgContent.replace(/<svg[^>]*>/i, (tag) => {
+                        return tag.replace(/\s+(width|height)=["'][^"']*["']/gi, '');
+                    });
+                    // ----------------------------------------------------
+
+                    paperProject.importSVG(svgContent, {
                         expandShapes: true, insert: false,
                         onLoad: function(item) {
                             importedSVGItem = item;
@@ -314,7 +336,6 @@
 
         function startHatching(solidItem, runId) {
             // INPUT UTENTE
-            // Fix: Usiamo l'ID corretto targetSizeMM
             const targetDimEl = document.getElementById('targetSizeMM');
             const targetDim = targetDimEl ? parseFloat(targetDimEl.value) : 15;
             
@@ -327,11 +348,24 @@
             // 1. SCALING
             // Centra su 0,0 locale per scalare
             solidItem.position = new paper.Point(0,0);
+            
+            // --- MODIFICA: Logica di Scala basata su ViewBox ---
             if (targetDim > 0) {
-                const b = solidItem.bounds;
-                const maxDim = Math.max(b.width, b.height);
-                if(maxDim > 0) solidItem.scale(targetDim / maxDim);
+                if (currentMode === 'svg' && importedViewBox && importedViewBox.width > 0 && importedViewBox.height > 0) {
+                    // Se è un SVG con ViewBox valido, usiamo il ViewBox come riferimento per la scala.
+                    // Esempio: ViewBox 24x24, targetDim 10mm -> 24 unità = 10mm.
+                    const maxVbDim = Math.max(importedViewBox.width, importedViewBox.height);
+                    const scaleFactor = targetDim / maxVbDim;
+                    solidItem.scale(scaleFactor);
+                } else {
+                    // Comportamento Standard (Testo o SVG senza ViewBox):
+                    // Scala il bounding box del disegno alla dimensione target.
+                    const b = solidItem.bounds;
+                    const maxDim = Math.max(b.width, b.height);
+                    if(maxDim > 0) solidItem.scale(targetDim / maxDim);
+                }
             }
+            // ---------------------------------------------------
 
             // 2. POSIZIONAMENTO VISUALE (PaperJS)
             // Attenzione: In PaperJS (Canvas), Y=0 è in alto. 
